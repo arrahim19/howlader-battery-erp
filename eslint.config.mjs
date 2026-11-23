@@ -27,6 +27,11 @@ export default [
     },
   },
   {
+    files: ["apps/mobile/**/*.{ts,tsx}"],
+    plugins: { "react-hooks": hooks },
+    rules: { ...hooks.configs.recommended.rules },
+  },
+  {
     files: ["apps/api/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
     rules: { "@typescript-eslint/no-explicit-any": "error" },
   },

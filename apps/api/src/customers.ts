@@ -38,6 +38,7 @@ import type {
 import type { AuthRequest } from "./auth";
 import { DatabaseService } from "./database.service";
 import { businessRange } from "./dashboard";
+import { nativeCreate } from "./native-create";
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === "string" ? value.trim() : value;
@@ -577,7 +578,7 @@ export class CustomersController {
         where,
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        orderBy: [{ soldAt: "desc" }, { id: "desc" }],
         include: {
           items: {
             orderBy: { lineNumber: "asc" },
@@ -721,26 +722,33 @@ export class CustomersController {
     @Req() req: AuthRequest,
   ) {
     checkAccess(req);
-    const customer = await this.db.$transaction(async (tx) => {
-      const created = await tx.customer.create({
-        data: {
-          name: body.name,
-          phone: body.phone,
-          address: body.address,
-        },
-        select: customerFields,
-      });
-      await tx.auditLog.create({
-        data: {
-          actorId: req.currentUser!.id,
-          action: "CUSTOMER_CREATED",
-          resourceType: "Customer",
-          resourceId: created.id,
-          requestId: req.requestId,
-        },
-      });
-      return created;
-    });
+    const customer = await nativeCreate(
+      this.db,
+      req,
+      "MOBILE_CUSTOMER_CREATE",
+      body,
+      async (tx, id) => {
+        const created = await tx.customer.create({
+          data: {
+            ...(id ? { id } : {}),
+            name: body.name,
+            phone: body.phone,
+            address: body.address,
+          },
+          select: customerFields,
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: req.currentUser!.id,
+            action: "CUSTOMER_CREATED",
+            resourceType: "Customer",
+            resourceId: created.id,
+            requestId: req.requestId,
+          },
+        });
+        return created;
+      },
+    );
     return {
       data: {
         ...customer,

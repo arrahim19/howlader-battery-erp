@@ -13,9 +13,6 @@ export const childNavigation: Record<
   replacements: [
     { label: "Replacement List", view: "list" },
     { label: "New Replacement", view: "new" },
-    { label: "Company Return", view: "dispatch" },
-    { label: "Received from Company", view: "receipts" },
-    { label: "Warranty Policy", view: "policy" },
   ],
   customers: [
     { label: "Customer List", view: "list" },

@@ -1,6 +1,7 @@
-import type { DatabaseService } from "./database.service";
+import type { PrismaClient } from "@prisma/client";
 
 type SessionIdentity = {
+  deviceSession: boolean;
   id: string;
   createdAt: Date;
   lastSeenAt: Date;
@@ -18,11 +19,11 @@ type SessionIdentity = {
 // Read current grants on every request in one database round trip. Never cache
 // authorization across requests: revocations and permission changes apply at once.
 export async function readSessionIdentity(
-  db: DatabaseService,
+  db: Pick<PrismaClient, "$queryRaw">,
   tokenHash: string,
 ) {
   const rows = await db.$queryRaw<SessionIdentity[]>`
-    SELECT s."id", s."createdAt", s."lastSeenAt", s."expiresAt", s."revokedAt",
+    SELECT s."id", s."createdAt", s."lastSeenAt", s."expiresAt", s."revokedAt", s."deviceSession",
       u."id" AS "userId", u."name", u."login", u."active", u."passwordChangedAt",
       COALESCE(array_agg(DISTINCT r."code" ORDER BY r."code")
         FILTER (WHERE r."code" IS NOT NULL), ARRAY[]::text[]) AS "roles",

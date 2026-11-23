@@ -23,8 +23,8 @@ async function main() {
         "Production requires ERP_ADMIN_PASSWORD from a secure operator environment.",
       );
     const password = supplied ?? randomBytes(18).toString("base64url");
-    if (password.length < 12 || password.length > 256)
-      throw new Error("Admin password must be 12–256 characters.");
+    if (password.length < 6 || password.length > 256)
+      throw new Error("Admin password must be 6–256 characters.");
     const passwordHash = await hash(password, passwordOptions);
     await db.$transaction(
       async (tx) => {

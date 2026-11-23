@@ -1,10 +1,9 @@
 "use client";
-import Link from "next/link";
-import { useState } from "react";
+import Link from "@/components/workspace-link";
+import { useEffect, useState } from "react";
 import {
   CheckCheck,
   Clock3,
-  Eye,
   PackageCheck,
   Plus,
   Search,
@@ -21,6 +20,7 @@ import {
 } from "@/components/reference-ui";
 import {
   post,
+  api,
   type ReplacementCase,
   type ReplacementList,
   type ReplacementStage,
@@ -28,6 +28,7 @@ import {
 import { useCatalogResource } from "@/lib/use-catalog-resource";
 import { notifyDashboardUpdate } from "@/lib/use-dashboard";
 import { businessDate } from "@/lib/utils";
+import { ReplacementDeleteButton } from "./replacement-delete-button";
 
 const stages = [
   {
@@ -61,10 +62,8 @@ const stages = [
 ] as const;
 const columns = [
   "#",
-  "কেস নং",
   "ইনভয়েস নং",
   "পণ্য",
-  "সিরিয়াল নং",
   "গ্রাহক",
   "জমার তারিখ",
   "স্ট্যাটাস",
@@ -83,10 +82,7 @@ export function ReplacementCases({
   const [status, setStatus] = useState(
     view === "dispatch" ? "SENT" : view === "receipts" ? "RECEIVED" : "all",
   );
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
   const [revision, setRevision] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -96,24 +92,65 @@ export function ReplacementCases({
   const params = new URLSearchParams({
     q: search,
     status,
-    page: String(page),
-    pageSize: String(pageSize),
+    page: "1",
+    pageSize: "100",
   });
   const resource = useCatalogResource<ReplacementList>(
     preview ? null : `/replacements?${params}`,
     revision,
     true,
   );
-  const items = (resource.data?.items ?? []).map((item) => {
+  const first = resource.data;
+  const query = params.toString();
+  const [remaining, setRemaining] = useState<{
+    first: ReplacementList;
+    items: ReplacementCase[];
+    error: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!first || first.items.length >= first.total) return;
+    const controller = new AbortController();
+    const initial = first;
+    async function loadRemaining() {
+      const items: ReplacementCase[] = [];
+      const params = new URLSearchParams(query);
+      for (let page = 2; page <= Math.ceil(initial.total / 100); page++) {
+        params.set("page", String(page));
+        const next = await api<ReplacementList>(`/replacements?${params}`, {
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        items.push(...next.items);
+        setRemaining({ first: initial, items: [...items], error: "" });
+      }
+    }
+    void loadRemaining().catch((failure: unknown) => {
+      if (!controller.signal.aborted)
+        setRemaining((previous) => ({
+          first: initial,
+          items: previous?.first === initial ? previous.items : [],
+          error:
+            failure instanceof Error
+              ? failure.message
+              : "Unable to load all replacements.",
+        }));
+    });
+    return () => controller.abort();
+  }, [first, query, revision]);
+  const extra = remaining?.first === first ? remaining : null;
+  const records = [...(first?.items ?? []), ...(extra?.items ?? [])];
+  const loadingMore = Boolean(
+    first && records.length < first.total && !extra?.error,
+  );
+  const items = records.map((item) => {
     const update = updates[item.id];
     return update && update.version > item.version
       ? { ...item, ...update }
       : item;
   });
-  const selected = items.find((item) => item.id === selectedId) ?? null;
   const summary = resource.data ? { ...resource.data.summary } : null;
   if (summary)
-    for (const original of resource.data!.items) {
+    for (const original of records) {
       const update = updates[original.id];
       if (
         update &&
@@ -124,7 +161,6 @@ export function ReplacementCases({
         summary[update.status]++;
       }
     }
-  const pages = Math.max(1, Math.ceil((resource.data?.total ?? 0) / pageSize));
   async function changeStatus(item: ReplacementCase, next: ReplacementStage) {
     if (savingId || next === item.status || preview) return;
     setSavingId(item.id);
@@ -155,24 +191,6 @@ export function ReplacementCases({
       setSavingId(null);
     }
   }
-  const detailRows = [
-    [
-      "স্ট্যাটাস",
-      selected
-        ? stages.find((stage) => stage.value === selected.status)!.label
-        : null,
-    ],
-    ["গ্রাহকের নাম", selected?.customer],
-    ["যোগাযোগ", selected?.phone],
-    ["পণ্য", selected?.product],
-    ["সিরিয়াল নং", selected?.serial],
-    ["ইনভয়েস নং", selected?.invoice],
-    ["জমার তারিখ", selected ? businessDate(selected.createdAt) : null],
-    [
-      "কোম্পানিতে পাঠানোর তারিখ",
-      selected?.sentAt ? businessDate(selected.sentAt) : null,
-    ],
-  ];
   return (
     <>
       <div className="erp-stats replacement-stats">
@@ -205,7 +223,6 @@ export function ReplacementCases({
                   value={search}
                   onChange={(event) => {
                     setSearch(event.target.value);
-                    setPage(1);
                   }}
                 />
               </label>
@@ -215,7 +232,6 @@ export function ReplacementCases({
                 value={status}
                 onChange={(event) => {
                   setStatus(event.target.value);
-                  setPage(1);
                 }}
               >
                 <option value="all">স্ট্যাটাস: সকল</option>
@@ -238,12 +254,12 @@ export function ReplacementCases({
               {message}
             </p>
           ) : null}
-          {error || resource.error ? (
+          {error || resource.error || extra?.error ? (
             <div
               role="alert"
               className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-red-50 p-3 text-sm text-red-700"
             >
-              <span>{error || resource.error}</span>
+              <span>{error || resource.error || extra?.error}</span>
               <Button
                 variant="outline"
                 size="sm"
@@ -256,159 +272,106 @@ export function ReplacementCases({
               </Button>
             </div>
           ) : null}
-          <div className="master-detail-layout">
-            <Panel>
-              <div className="erp-table-wrap">
-                <table className="erp-table" aria-busy={resource.loading}>
-                  <caption className="sr-only">Replacement cases</caption>
-                  <thead>
-                    <tr>
-                      {columns.map((column) => (
-                        <th key={column} scope="col">
-                          {column}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.length ? (
-                      items.map((item, index) => (
-                        <tr
-                          key={item.id}
-                          className={
-                            selectedId === item.id ? "bg-green-50" : undefined
-                          }
-                        >
-                          <td>{(page - 1) * pageSize + index + 1}</td>
-                          <td>{item.number}</td>
-                          <td>{item.invoice ?? "—"}</td>
-                          <td>{item.product}</td>
-                          <td>{item.serial}</td>
-                          <td>{item.customer ?? "—"}</td>
-                          <td>{businessDate(item.createdAt)}</td>
-                          <td>
-                            <select
-                              className="replacement-status"
-                              aria-label={`Status for ${item.number}`}
-                              value={item.status}
-                              disabled={
-                                preview ||
-                                Boolean(savingId) ||
-                                !stages.some((stage) =>
-                                  user?.permissions.includes(stage.permission),
-                                )
-                              }
-                              onChange={(event) =>
-                                void changeStatus(
-                                  item,
-                                  event.target.value as ReplacementStage,
-                                )
-                              }
-                            >
-                              {stages.map((stage) => (
-                                <option
-                                  key={stage.value}
-                                  value={stage.value}
-                                  disabled={
-                                    !user?.permissions.includes(
-                                      stage.permission,
-                                    )
-                                  }
-                                >
-                                  {stage.label}
-                                </option>
-                              ))}
-                            </select>
-                            {savingId === item.id ? (
-                              <span
-                                role="status"
-                                className="ml-2 text-xs text-slate-500"
-                              >
-                                Saving…
-                              </span>
-                            ) : null}
-                          </td>
-                          <td>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              aria-label={`Details for ${item.number}`}
-                              onClick={() => setSelectedId(item.id)}
-                            >
-                              <Eye size={16} />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={columns.length}>
-                          <p
-                            role="status"
-                            className="py-16 text-center text-sm text-slate-500"
+          <Panel className="replacement-list-panel">
+            <div className="erp-table-wrap">
+              <table className="erp-table" aria-busy={resource.loading}>
+                <caption className="sr-only">Replacement cases</caption>
+                <thead>
+                  <tr>
+                    {columns.map((column) => (
+                      <th key={column} scope="col">
+                        {column}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.length ? (
+                    items.map((item, index) => (
+                      <tr key={item.id}>
+                        <td>{index + 1}</td>
+                        <td>{item.invoice ?? "N/A"}</td>
+                        <td>{item.product}</td>
+                        <td>{item.customer ?? "N/A"}</td>
+                        <td>{businessDate(item.createdAt)}</td>
+                        <td>
+                          <select
+                            className="replacement-status"
+                            aria-label={`Status for ${item.number}`}
+                            value={item.status}
+                            disabled={
+                              preview ||
+                              Boolean(savingId) ||
+                              !stages.some((stage) =>
+                                user?.permissions.includes(stage.permission),
+                              )
+                            }
+                            onChange={(event) =>
+                              void changeStatus(
+                                item,
+                                event.target.value as ReplacementStage,
+                              )
+                            }
                           >
-                            {resource.loading
-                              ? "Loading records…"
-                              : "No records to display"}
-                          </p>
+                            {stages.map((stage) => (
+                              <option
+                                key={stage.value}
+                                value={stage.value}
+                                disabled={
+                                  !user?.permissions.includes(stage.permission)
+                                }
+                              >
+                                {stage.label}
+                              </option>
+                            ))}
+                          </select>
+                          {savingId === item.id ? (
+                            <span
+                              role="status"
+                              className="ml-2 text-xs text-slate-500"
+                            >
+                              Saving…
+                            </span>
+                          ) : null}
+                        </td>
+                        <td>
+                          <ReplacementDeleteButton
+                            item={item}
+                            preview={preview}
+                            onDeleted={() => {
+                              setMessage("Replacement deleted.");
+                              setRevision((value) => value + 1);
+                            }}
+                          />
                         </td>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <div className="erp-pagination">
-                <label>
-                  প্রতি পাতায় দেখান:{" "}
-                  <select
-                    aria-label="Rows per page"
-                    value={pageSize}
-                    onChange={(event) => {
-                      setPageSize(Number(event.target.value));
-                      setPage(1);
-                    }}
-                  >
-                    {[10, 25, 50].map((size) => (
-                      <option key={size}>{size}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page <= 1 || resource.loading}
-                    onClick={() => setPage((value) => value - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <span>
-                    {page} / {pages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page >= pages || resource.loading}
-                    onClick={() => setPage((value) => value + 1)}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            </Panel>
-            <Panel title="Replacement Details" className="erp-details">
-              <dl>
-                {detailRows.map(([label, value]) => (
-                  <div key={label}>
-                    <dt>{label}</dt>
-                    <dd>
-                      <span>:</span> {value ?? "—"}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </Panel>
-          </div>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={columns.length}>
+                        <p
+                          role="status"
+                          className="py-16 text-center text-sm text-slate-500"
+                        >
+                          {resource.loading
+                            ? "Loading records…"
+                            : "No records to display"}
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {loadingMore ? (
+              <p
+                role="status"
+                className="shrink-0 p-2 text-center text-xs text-slate-500"
+              >
+                Loading more replacements?
+              </p>
+            ) : null}
+          </Panel>
         </>
       ) : null}
     </>

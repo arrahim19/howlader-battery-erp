@@ -1,7 +1,13 @@
 "use client";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import Link from "@/components/workspace-link";
+import { usePathname, useRouter } from "@/lib/workspace-router";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Dialog, DropdownMenu } from "radix-ui";
 import {
   ArrowLeftRight,
@@ -26,7 +32,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { post } from "@/lib/api";
+import { api, post, RESOURCE_CHANGED_EVENT } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/components/session-provider";
 import { Button } from "@/components/ui/button";
@@ -132,15 +138,57 @@ export function AppShell({
   children,
   preview = false,
   previewModule = "dashboard",
+  deviceMenu,
+  deviceStatus,
+  headerStatus,
 }: {
   children: ReactNode;
   preview?: boolean;
   previewModule?: string;
   previewView?: string;
+  deviceMenu?: ReactNode;
+  deviceStatus?: ReactNode;
+  headerStatus?: ReactNode;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const user = useSession();
+  const [shopProfile, setShopProfile] = useState<{
+    name?: string;
+    address?: string;
+    phone?: string;
+  } | null>(null);
+  useEffect(() => {
+    if (preview || !user) return;
+    let controller: AbortController | undefined;
+    function refresh() {
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      api<{ name?: string; address?: string; phone?: string }>(
+        "/shop-profile",
+        { signal },
+      )
+        .then((profile) => {
+          if (!signal.aborted) setShopProfile(profile);
+        })
+        .catch(() => {
+          /* Keep the last shop identity when a refresh is unavailable. */
+        });
+    }
+    function onStorage(event: StorageEvent) {
+      if (event.key === RESOURCE_CHANGED_EVENT) refresh();
+    }
+    refresh();
+    window.addEventListener(RESOURCE_CHANGED_EVENT, refresh);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      controller?.abort();
+      window.removeEventListener(RESOURCE_CHANGED_EVENT, refresh);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [preview, user]);
+  const shopName = shopProfile?.name || "Howlader Battery";
   const current = preview ? previewModule : pathname.split("/")[1];
   const contentRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -209,14 +257,19 @@ export function AppShell({
       <Link
         href={workspaceHref("dashboard", "", preview)}
         className="brand"
-        aria-label="Howlader Battery dashboard"
+        aria-label={`${shopName} dashboard`}
         onClick={() => setOpen(false)}
       >
         <span className="brand-icon">
           <BrandMark />
         </span>
         <span>
-          <strong>Howlader Battery</strong>
+          <strong>{shopName}</strong>
+          {user?.shop?.branchName ? (
+            <span className="mt-1 block text-[10px] font-medium text-slate-300">
+              {user.shop.branchName}
+            </span>
+          ) : null}
         </span>
       </Link>
       <nav
@@ -248,11 +301,11 @@ export function AppShell({
         <div className="shop-card">
           <Store size={28} strokeWidth={1.5} />
           <div>
-            <strong>হাওলাদার ব্যাটারী হাউজ</strong>
-            <p>ব্যাটারি ও অটো পার্টস ম্যানেজমেন্ট</p>
+            <strong>{shopProfile?.name || "হাওলাদার ব্যাটারী হাউজ"}</strong>
+            <p>{shopProfile?.address || "ব্যাটারি ও অটো পার্টস ম্যানেজমেন্ট"}</p>
             <span>
               <Phone size={12} />
-              যোগাযোগের তথ্য যুক্ত হয়নি
+              {shopProfile?.phone || "যোগাযোগের তথ্য যুক্ত হয়নি"}
             </span>
           </div>
         </div>
@@ -321,6 +374,7 @@ export function AppShell({
               </Dialog.Portal>
             </Dialog.Root>
             <h1>{currentLabel}</h1>
+            {headerStatus}
           </div>
           <div className="header-controls">
             <span className="header-date">
@@ -382,6 +436,7 @@ export function AppShell({
                   <DropdownMenu.Label className="account-dropdown-label">
                     {preview ? "UI preview · no business records" : user?.login}
                   </DropdownMenu.Label>
+                  {deviceMenu}
                   {preview ? (
                     <DropdownMenu.Item asChild>
                       <Link href="/login" className="account-dropdown-item">
@@ -418,6 +473,7 @@ export function AppShell({
             <Link href="/login">Sign in ↗</Link>
           </div>
         ) : null}
+        {deviceStatus}
         <main id="main-content" className="main-content">
           <div
             className="workspace-content"

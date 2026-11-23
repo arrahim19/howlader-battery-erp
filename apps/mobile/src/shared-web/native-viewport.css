@@ -1,0 +1,41 @@
+/* Native SafeAreaView already excludes system bars. Fill that container and
+   anchor navigation to it, instead of reserving browser safe areas again. */
+.mobile-auth {
+  width: 100%;
+  min-width: 0;
+}
+html[data-native-workspace],
+html[data-native-workspace] body,
+html[data-native-workspace] #root {
+  height: 100%;
+  min-height: 0;
+}
+html[data-native-workspace] .mobile-auth {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+html[data-native-workspace] .mobile-auth > main {
+  min-height: 100%;
+}
+html[data-native-workspace] .app-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+@media (max-width: 1023px) {
+  html[data-native-workspace] .app-shell .app-body {
+    position: relative;
+    height: 100%;
+    min-height: 0;
+  }
+  html[data-native-workspace] .app-shell.has-quick-access .app-body {
+    padding-bottom: 77px;
+  }
+  html[data-native-workspace] .mobile-quick-access {
+    position: absolute;
+    inset-inline: 10px;
+    bottom: 5px;
+  }
+}

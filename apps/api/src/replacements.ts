@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Inject,
@@ -24,8 +25,8 @@ import {
   Max,
   MaxLength,
   Min,
-  MinLength,
   IsUUID,
+  Equals,
 } from "class-validator";
 import { randomUUID } from "node:crypto";
 import {
@@ -34,6 +35,7 @@ import {
 } from "../../../packages/api-client/src";
 import { type AuthRequest } from "./auth";
 import { DatabaseService } from "./database.service";
+import { nativeCreate } from "./native-create";
 
 const groups: Record<ReplacementStage, ReplacementStatus[]> = {
   FAULTY: ["PENDING_RETURN", "REJECTED"],
@@ -60,6 +62,10 @@ class StatusDto {
   @IsIn(replacementStatuses) status!: ReplacementStage;
   @IsInt() @Min(1) version!: number;
 }
+class DeleteReplacementDto {
+  @IsInt() @Min(1) version!: number;
+  @Equals(true) confirmed!: boolean;
+}
 class OptionsDto {
   @IsIn(["BEFORE_SALE", "CUSTOMER_WARRANTY"]) source:
     "BEFORE_SALE" | "CUSTOMER_WARRANTY" = "CUSTOMER_WARRANTY";
@@ -71,7 +77,7 @@ class IntakeDto extends OptionsDto {
   @IsUUID() unitId!: string;
   @IsOptional() @IsUUID() saleUnitId?: string;
   @IsUUID() supplierId!: string;
-  @IsString() @MinLength(1) @MaxLength(2000) faultReason!: string;
+  @IsString() @MaxLength(2000) faultReason = "";
 }
 const validation = (expectedType: new () => object) =>
   new ValidationPipe({
@@ -230,8 +236,6 @@ export class ReplacementsController {
       throw new ForbiddenException(
         "You do not have permission for this replacement source.",
       );
-    if (!body.faultReason.trim())
-      throw new BadRequestException("Enter the fault reason.");
     try {
       const data = await this.db.$transaction(
         async (tx) => {
@@ -239,6 +243,10 @@ export class ReplacementsController {
             where: { id: body.id },
           });
           if (prior) {
+            if (prior.outcome === "CANCELLED")
+              throw new ConflictException(
+                "This registration was deleted. Start a new replacement.",
+              );
             if (
               prior.oldUnitId !== body.unitId ||
               prior.supplierId !== body.supplierId ||
@@ -544,6 +552,7 @@ export class ReplacementsController {
       mode: "insensitive" as const,
     };
     const where: Prisma.ReplacementRecordWhereInput = {
+      AND: [{ OR: [{ outcome: null }, { outcome: { not: "CANCELLED" } }] }],
       ...(query.status === "all"
         ? {}
         : { status: { in: groups[query.status] } }),
@@ -589,6 +598,7 @@ export class ReplacementsController {
       }),
       this.db.replacementRecord.count({ where }),
       this.db.replacementRecord.groupBy({
+        where: { OR: [{ outcome: null }, { outcome: { not: "CANCELLED" } }] },
         by: ["status"],
         orderBy: { status: "asc" },
         _count: { _all: true },
@@ -604,6 +614,7 @@ export class ReplacementsController {
         items: items.map((item) => ({
           id: item.id,
           number: item.number,
+          source: item.source,
           status: stageOf(item.status),
           version: item.version,
           product: item.oldUnit.product.name,
@@ -638,35 +649,202 @@ export class ReplacementsController {
       throw new ForbiddenException(
         "You do not have permission to set this status.",
       );
-    const data = await this.db.$transaction(async (tx) => {
-      const current = await tx.replacementRecord.findUnique({ where: { id } });
-      if (!current) throw new NotFoundException("Replacement case not found.");
-      if (current.version !== body.version)
-        throw new ConflictException(
-          "This case was changed by another user. Refresh and try again.",
-        );
-      if (stageOf(current.status) === body.status)
-        return { id, status: body.status, version: current.version };
-      const updated = await tx.replacementRecord.updateMany({
-        where: { id, version: body.version },
-        data: { status: groups[body.status][0], version: { increment: 1 } },
-      });
-      if (!updated.count)
-        throw new ConflictException(
-          "This case was changed by another user. Refresh and try again.",
-        );
-      await tx.auditLog.create({
-        data: {
-          actorId: req.currentUser!.id,
-          requestId: req.requestId,
-          action: "REPLACEMENT_STATUS_CHANGED",
-          resourceType: "ReplacementRecord",
-          resourceId: id,
-          metadata: { from: current.status, to: groups[body.status][0] },
-        },
-      });
-      return { id, status: body.status, version: current.version + 1 };
-    });
+    const data = await nativeCreate(
+      this.db,
+      req,
+      "MOBILE_REPLACEMENT_STATUS",
+      { id, ...body },
+      async (tx) => {
+        const current = await tx.replacementRecord.findUnique({
+          where: { id },
+        });
+        if (!current)
+          throw new NotFoundException("Replacement case not found.");
+        if (current.outcome === "CANCELLED")
+          throw new ConflictException("This replacement was deleted.");
+        if (current.version !== body.version)
+          throw new ConflictException(
+            "This case was changed by another user. Refresh and try again.",
+          );
+        if (stageOf(current.status) === body.status)
+          return { id, status: body.status, version: current.version };
+        const updated = await tx.replacementRecord.updateMany({
+          where: { id, version: body.version },
+          data: { status: groups[body.status][0], version: { increment: 1 } },
+        });
+        if (!updated.count)
+          throw new ConflictException(
+            "This case was changed by another user. Refresh and try again.",
+          );
+        await tx.auditLog.create({
+          data: {
+            actorId: req.currentUser!.id,
+            requestId: req.requestId,
+            action: "REPLACEMENT_STATUS_CHANGED",
+            resourceType: "ReplacementRecord",
+            resourceId: id,
+            metadata: { from: current.status, to: groups[body.status][0] },
+          },
+        });
+        return { id, status: body.status, version: current.version + 1 };
+      },
+    );
+    return { data };
+  }
+
+  @Delete(":id")
+  async remove(
+    @Req() req: AuthRequest,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(validation(DeleteReplacementDto)) body: DeleteReplacementDto,
+  ) {
+    if (
+      !req.currentUser!.permissions.includes("transactions.reverse") ||
+      !req.currentUser!.permissions.includes("replacements.resolve")
+    )
+      throw new ForbiddenException(
+        "You do not have permission to delete replacements.",
+      );
+    const data = await this.db.$transaction(
+      async (tx) => {
+        // Serialize deletes and status changes before touching the battery.
+        await tx.$queryRaw`SELECT id FROM "ReplacementRecord" WHERE id = ${id}::uuid FOR UPDATE`;
+        const record = await tx.replacementRecord.findUnique({
+          where: { id },
+          include: {
+            dispatchItems: true,
+            receiptItem: true,
+            reservedUnits: true,
+          },
+        });
+        if (!record) throw new NotFoundException("Replacement case not found.");
+        if (record.outcome === "CANCELLED") return { id, deleted: true };
+        if (record.version !== body.version)
+          throw new ConflictException(
+            "This case changed. Refresh and try again.",
+          );
+        if (
+          record.dispatchItems.length ||
+          record.receiptItem ||
+          record.reservedUnits.length ||
+          record.outcomeResolvedAt
+        )
+          throw new ConflictException(
+            "This replacement has dependent stock transactions and cannot be deleted.",
+          );
+        await tx.$queryRaw`SELECT id FROM "BatteryUnit" WHERE id = ${record.oldUnitId}::uuid FOR UPDATE`;
+        const unit = await tx.batteryUnit.findUniqueOrThrow({
+          where: { id: record.oldUnitId },
+        });
+        const intake = await tx.stockMovement.findFirst({
+          where: {
+            batteryUnitId: unit.id,
+            posting: { sourceCode: "replacement-intake:" + id },
+          },
+          include: { reversals: true },
+        });
+        if (
+          !intake ||
+          intake.reversals ||
+          !intake.fromCustody ||
+          !intake.fromState ||
+          !intake.fromCondition ||
+          !intake.fromOwnership
+        )
+          throw new ConflictException(
+            "The original replacement stock movement cannot be reversed.",
+          );
+        if (
+          unit.custody !== intake.toCustody ||
+          unit.commercialState !== intake.toState ||
+          unit.condition !== intake.toCondition ||
+          unit.ownership !== intake.toOwnership ||
+          unit.reservedCustomerId ||
+          unit.reservedReplacementId ||
+          (await tx.stockMovement.count({
+            where: {
+              batteryUnitId: unit.id,
+              id: { not: intake.id },
+              createdAt: { gte: intake.createdAt },
+            },
+          }))
+        )
+          throw new ConflictException(
+            "This battery changed after registration. Its later stock transactions must be reversed first.",
+          );
+        const reason = "Delete replacement " + record.number;
+        const posting = await tx.posting.create({
+          data: {
+            kind: "REPLACEMENT_INTAKE_REVERSAL",
+            sourceCode: "replacement-delete:" + id,
+            actorId: req.currentUser!.id,
+            reason,
+          },
+        });
+        await tx.stockMovement.create({
+          data: {
+            postingId: posting.id,
+            lineNumber: 1,
+            productId: intake.productId,
+            batchId: intake.batchId,
+            batteryUnitId: unit.id,
+            quantity: intake.quantity,
+            reversedMovementId: intake.id,
+            fromCustody: intake.toCustody,
+            toCustody: intake.fromCustody,
+            fromState: intake.toState,
+            toState: intake.fromState,
+            fromCondition: intake.toCondition,
+            toCondition: intake.fromCondition,
+            fromOwnership: intake.toOwnership,
+            toOwnership: intake.fromOwnership,
+            reason,
+          },
+        });
+        const restored = await tx.batteryUnit.updateMany({
+          where: { id: unit.id, version: unit.version },
+          data: {
+            custody: intake.fromCustody,
+            commercialState: intake.fromState,
+            condition: intake.fromCondition,
+            ownership: intake.fromOwnership,
+            version: { increment: 1 },
+          },
+        });
+        if (!restored.count)
+          throw new ConflictException(
+            "This battery changed. Refresh and try again.",
+          );
+        const cancelled = await tx.replacementRecord.updateMany({
+          where: { id, version: record.version },
+          data: {
+            outcome: "CANCELLED",
+            outcomeResolvedAt: new Date(),
+            version: { increment: 1 },
+          },
+        });
+        if (!cancelled.count)
+          throw new ConflictException(
+            "This case changed. Refresh and try again.",
+          );
+        await tx.auditLog.create({
+          data: {
+            actorId: req.currentUser!.id,
+            requestId: req.requestId,
+            action: "REPLACEMENT_DELETED",
+            resourceType: "ReplacementRecord",
+            resourceId: id,
+            metadata: {
+              source: record.source,
+              oldUnitId: unit.id,
+              reversalPostingId: posting.id,
+            },
+          },
+        });
+        return { id, deleted: true };
+      },
+      { timeout: 30_000 },
+    );
     return { data };
   }
 }

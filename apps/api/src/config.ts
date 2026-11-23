@@ -11,6 +11,7 @@ config({
 export function settings() {
   const production = process.env.NODE_ENV === "production";
   const origin = process.env.APP_ORIGIN ?? "http://localhost:3000";
+  // PostgreSQL/Neon credentials stay in the API; phones use its public URL.
   const csrfSecret = process.env.CSRF_SECRET;
   const databaseUrl = process.env.DATABASE_URL;
   if (

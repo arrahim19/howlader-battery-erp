@@ -145,9 +145,51 @@ Get-Content -LiteralPath .local\admin-credentials.txt
 
 The default username is `owner`; the generated password is random, not a shared default. Only the initial user, roles/permissions, shop configuration and chart-of-account definitions are inserted. No transactions, products, customers, suppliers, stock or balances are seeded. Re-running for an existing login preserves its password.
 
-To supply a password yourself, set `ERP_ADMIN_PASSWORD` securely in the process environment before running the command. Production requires a supplied password of 12–256 characters and never writes it to disk. This bootstrap is not a password-reset tool. Password change/reset and user administration screens are pending; do not delete or edit user database rows to bypass them.
+To supply a password yourself, set `ERP_ADMIN_PASSWORD` securely in the process environment before running the command. Production requires a supplied password of 6–256 characters and never writes it to disk. This bootstrap is not a password-reset tool. Use **Users & Permissions → Edit** to edit a user's display name or change your own password. Changing a password requires the current password and revokes every session; sign in again afterwards. User creation and role administration screens are still pending.
 
-## Start and open
+## Gmail login and password recovery
+
+Each shop account now opens only its own shop. The sidebar shows the branch name even when both businesses use the same shop name. See **Separate shop accounts** below for provisioning and migration requirements.
+
+Run `npm run db:migrate` after updating the application. The account migration adds nullable email fields and a token table; it preserves existing users, passwords, roles, and business records.
+
+Configure the Gmail sender locally with a Google App Password (Google 2-Step Verification must be enabled):
+
+```powershell
+.\scripts\configure-gmail.ps1 -Email 'you@gmail.com'
+```
+
+The script prompts for the 16-character App Password using hidden input and writes the SMTP configuration to the ignored root `.env`. It preserves other environment settings. Do not paste the App Password into chat or use the normal Gmail password. Create an App Password at <https://myaccount.google.com/apppasswords>. If Google does not offer App Passwords for the account, configure another authenticated SMTP provider instead.
+
+Restart the API after changing `.env`. For hosted deployments, configure `SMTP_HOST`, `SMTP_PORT` (`465` for implicit TLS or `587` for STARTTLS), `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` in the hosting service's secret environment settings as well. Set `APP_ORIGIN` to the URL users open: verification and recovery links use this trusted origin, and localhost links work only on the machine running the application.
+
+In **Users & Permissions → Edit**, enter your recovery email and current ERP password, then select **Send verification email**. Open the emailed link and explicitly select **Verify email**. Only after verification can the email be used for login and password recovery. Your original login remains available, and your existing ERP password remains the same. Changing a verified email signs out all sessions and invalidates existing reset links.
+
+**Forgot password?** on the login page accepts the verified email. Reset and verification links expire after 20 minutes, are single use, and are stored only as SHA-256 digests. New links replace older links of the same type. Resetting a password revokes all sessions and outstanding email tokens. Requests enforce Origin, CSRF, and rate limits. Recovery responses do not disclose whether an email belongs to an account. SMTP failures are logged without addresses, transport secrets, or token values. Without SMTP configuration, the UI explains that email delivery is unavailable; display name and password changes still work.
+
+`tests/integration/account.test.ts` uses an in-memory fake mail sender against the isolated test database, so automated tests never email real users. Browser tests mock API responses and cover the desktop and mobile forms. Real Gmail delivery must be checked after supplying the App Password locally.
+
+## Separate shop accounts
+
+The original shop remains in PostgreSQL's `public` schema and is labelled **Betagi**. Additional shops have separate PostgreSQL schemas containing their own users, roles, settings, catalog, customers, suppliers, stock, purchases, sales, payments, ledgers, expenses, replacements, recycle bin, audit history, and document counters. No balances or business records are copied when a shop is created. Only the shared `public.Shop` registry determines which schemas authentication may use. Every new shop starts with its own three fixed product categories and chart of accounts.
+
+For Neon, keep `DATABASE_URL` as the pooled URL and configure `DATABASE_URL_UNPOOLED` with the direct connection URL. Additional shop connections need a persistent `search_path`, which Neon's transaction pooler does not accept as a startup option. The adapter qualifies Prisma queries with the shop schema, and raw SQL uses the same schema without a `public` fallback.
+
+Provision a new shop from the project root:
+
+```powershell
+npm run shop:create -- --email 'owner@example.com' --branch 'Branch name' --name 'Hawlader Battery House' --user-name 'Shop Owner'
+```
+
+Provisioning is transactional and rejects an email already used by any shop. The new owner gets a random undisclosed password and an unverified email. To deliver an activation email, use **Forgot password** with that email after obtaining authorization to send the invitation. The recipient follows the activation link and chooses a password; this verifies ownership of the email. Until then, the account cannot be used with any known password. Activation links expire after 20 minutes; Forgot password can issue a new one. Never manually mark an email verified or distribute a shared password.
+
+Authentication selects a shop from the server-side registry and stores the selection in a separate async context for each HTTP request. Request bodies, headers, and query strings cannot select a different shop. Users, permissions, profile changes, password recovery, and email verification all resolve to the correct shop. Disabling a registry entry blocks that shop's sessions on the next request. The user list is local to its shop; the Betagi owner cannot edit the Mirzaganj owner's account from the Betagi user list.
+
+`npm run db:migrate` applies shared migrations with Prisma and then migrates every additional shop. `scripts/migrate-shops.ts` verifies previously applied checksums and records shop migrations separately. Historical transaction wrappers are removed when running inside provisioning's transaction; deferred checks and temporary tables are flushed between migration files. Do not replace this with `db push` or run unqualified historical SQL manually against a business database. The `202611210001_shop_registry` migration is shared only and is not replayed inside each shop.
+
+Integration tests use isolated schemas inside an isolated test database, fake email delivery, concurrent shop requests, cross-shop IDs, activation/reset links, and real purchase/sale/expense postings. They verify that provisioning preserves the original shop's records. Browser tests cover branch labels and the activation form on desktop and mobile. Inter-shop stock transfers and combined reports are separate features and are not part of this account separation.
+
+## Start the local servers
 
 ```powershell
 npm run dev

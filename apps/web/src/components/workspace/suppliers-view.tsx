@@ -1,7 +1,7 @@
 "use client";
-import Link from "next/link";
+import Link from "@/components/workspace-link";
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/workspace-router";
 import { z } from "zod";
 import { Dialog, AlertDialog } from "radix-ui";
 import {

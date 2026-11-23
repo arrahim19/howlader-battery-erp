@@ -1,5 +1,7 @@
 # Hawlader Battery ERP
 
+**Current architecture:** Android local SQLite ↔ authenticated ERP API ↔ Neon PostgreSQL. Version 1.0.8 requires login on each full app restart and uses local reads/writes, immediate stock/balance/cache updates and a durable sync journal. One online login/download enrolls offline email/password login and downloads all permitted core lists and ledgers. Reconnect/foreground sync uploads pending operations and atomically refreshes local data. Google/Drive entry points are retired. See [Android offline behavior and limits](apps/mobile/README.md#local-database-and-sync).
+
 Vercel hosting setup: [deployment guide](docs/VERCEL.md).
 
 ERP and POS for Hawlader Battery House, Bangladesh: individually tracked batteries, auto parts, purchasing, sales, warranty replacements, accounts, and reporting.
@@ -13,6 +15,8 @@ Purchase drafts/partial receiving, POS posting, replacements, financial correcti
 Supplier contacts support saving and browsing real database records at `/suppliers`, with search, status filtering, pagination, and contact details. Name and mobile are required; company is optional. Supplier addresses have been removed from forms, the database, and deleted-supplier snapshots. Standalone supplier payments remain future work.
 
 Sales use sequential six-digit invoice numbers such as `HWB-000001`. New Sale shows persisted Recent Sales, with a separate view for the current sale's items. Owners with `transactions.reverse` can use Delete on Recent Sales and Recent Purchases after confirming through a checkbox that goods and money have been returned. Deletion cancels the transaction through linked stock, payment and journal reversals; the original records remain as history. Sales with returns, warranty claims or incompatible corrections are blocked. Purchase cancellation requires a single complete receipt and all purchased stock still available; used stock must be reversed through its dependent transactions first.
+
+Replacement Cases provides a confirmed Delete action for users with `transactions.reverse` and `replacements.resolve`. Deletion reverses the original intake stock movement and retains the cancelled case and audit history. Before-sale batteries return to their exact prior shop stock state; customer-warranty batteries return to their prior customer state without adding sellable shop stock. Purchase amounts and supplier balances do not change. Deleted cases disappear from the list and summary counts, and repeated deletion cannot restore stock twice. Later stock movements, dispatches, receipts, reservations, or resolved outcomes block deletion.
 
 Inventory / Stock (`/inventory`) contains the catalog and its left-hand Product Category filter. It is a single navigation entry with no Product List/Add Product dropdown, standalone Add Product page, or inventory product-entry dialog. Legacy `/products`, `/products/new`, and `/inventory/new` links redirect to `/inventory`; dashboard links open the stock overview. The category heading has a three-dot Add/Delete menu. Below it, product lists are headed directly by their category names, such as Battery or Parts, with a separate three-dot product-name Add/Delete menu for each category; there is no generic Product Name heading or separate Add/plus button. Opening Add from a category's menu preselects that category, including while All Products is selected. The interface calls database product types Product Category. Selecting a category/name enables its Delete action, followed by confirmation. Categories containing products cannot be deleted. A product name can be removed from its selected category only when no active or inactive products use that pair; shared names in other categories remain intact. All Products shows every category and its scoped names/counts, including names with zero products. New stock is added through Purchase. There are no Brands or separate Category-name inputs; existing database brand records remain intact. No preset categories or product names are seeded.
 
@@ -70,7 +74,15 @@ Get-Content -LiteralPath .local\admin-credentials.txt
 
 No default password, sample products, customers, purchases, sales, or balances are seeded. Re-running the command preserves an existing login and password. The local credentials file contains a plaintext development secret; keep it private. Production bootstrap requires a supplied operator password and writes no credentials file.
 
+Account names and your own password can be changed under **Users & Permissions → Edit**. To use Gmail for login and password recovery, configure SMTP and verify the account's email first. See [Gmail login and password recovery](docs/DEVELOPMENT.md#gmail-login-and-password-recovery). Existing logins and business records are preserved.
+
+Separate shops can use the same business name while keeping all their users, stock, transactions, balances, and settings separate. Authentication automatically opens the user's shop; its branch name appears in the sidebar. See [Separate shop accounts](docs/DEVELOPMENT.md#separate-shop-accounts) for provisioning, activation, and migration instructions.
+
 ## Run the servers separately
+
+The React Native Android app is in [apps/mobile](apps/mobile/README.md). Run `npm run dev:mobile` for Expo Go on your phone, `npm run build:android` to build an installable APK on this Windows PC, and `npm run test:mobile:e2e` for its separate screen tests. Local APK builds use the installed Android SDK/Java and do not require Expo cloud login. `npm run build:mobile` only exports the Android JavaScript bundle. Both branches use the same API with separate shop accounts.
+
+The Android app keeps downloaded records and a durable queue in a local SQLite database. Sales, purchases, expenses and customer collections sync with the server when connected; conflicts stay visible for review. Run `npm run test:mobile` for SQLite persistence, replay and isolation checks. See [Local database and sync](apps/mobile/README.md#local-database-and-sync) for the offline scope and connection requirements.
 
 In two terminals at the project root:
 

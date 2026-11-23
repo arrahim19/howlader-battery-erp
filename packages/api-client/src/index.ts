@@ -1,4 +1,5 @@
 export interface CurrentUser {
+  shop?: { id: string; name: string; branchName: string };
   id: string;
   name: string;
   login: string;
@@ -187,6 +188,7 @@ export interface SalesOptions {
   paymentAccounts: { id: string; name: string; paymentMethod: string | null }[];
 }
 export interface CompletedSale {
+  syncStatus?: "PENDING";
   id: string;
   invoiceNumber: string;
   customerId: string;
@@ -215,6 +217,7 @@ export interface SalesList {
   pageSize: number;
 }
 export interface ReceivedPurchase {
+  syncStatus?: "PENDING";
   transportAmount?: string;
   id: string;
   number: string;
@@ -299,6 +302,7 @@ export const replacementStatuses = [
 export type ReplacementStage = (typeof replacementStatuses)[number];
 export interface ReplacementCase {
   id: string;
+  source?: "BEFORE_SALE" | "CUSTOMER_WARRANTY";
   number: string;
   status: ReplacementStage;
   version: number;

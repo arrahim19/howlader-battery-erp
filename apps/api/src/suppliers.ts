@@ -32,6 +32,7 @@ import {
 } from "class-validator";
 import { Permissions, type AuthRequest } from "./auth";
 import { DatabaseService } from "./database.service";
+import { nativeCreate } from "./native-create";
 import {
   orderProductCategories,
   productCategoryCodes,
@@ -488,36 +489,43 @@ export class SuppliersController {
     body: CreateSupplierDto,
     @Req() req: AuthRequest,
   ) {
-    const supplier = await this.db.$transaction(async (tx) => {
-      const category = await tx.productType.findFirst({
-        where: {
-          id: body.productTypeId,
-          active: true,
-          code: { in: productCategoryCodes },
-        },
-      });
-      if (!category)
-        throw new BadRequestException("Select an active product category.");
-      const created = await tx.supplier.create({
-        data: {
-          productTypeId: category.id,
-          name: body.name,
-          phone: body.phone,
-          company: body.company || null,
-        },
-        select: contactFields,
-      });
-      await tx.auditLog.create({
-        data: {
-          actorId: req.currentUser!.id,
-          action: "SUPPLIER_CREATED",
-          resourceType: "Supplier",
-          resourceId: created.id,
-          requestId: req.requestId,
-        },
-      });
-      return created;
-    });
+    const supplier = await nativeCreate(
+      this.db,
+      req,
+      "MOBILE_SUPPLIER_CREATE",
+      body,
+      async (tx, id) => {
+        const category = await tx.productType.findFirst({
+          where: {
+            id: body.productTypeId,
+            active: true,
+            code: { in: productCategoryCodes },
+          },
+        });
+        if (!category)
+          throw new BadRequestException("Select an active product category.");
+        const created = await tx.supplier.create({
+          data: {
+            productTypeId: category.id,
+            ...(id ? { id } : {}),
+            name: body.name,
+            phone: body.phone,
+            company: body.company || null,
+          },
+          select: contactFields,
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: req.currentUser!.id,
+            action: "SUPPLIER_CREATED",
+            resourceType: "Supplier",
+            resourceId: created.id,
+            requestId: req.requestId,
+          },
+        });
+        return created;
+      },
+    );
     return { data: supplier };
   }
 

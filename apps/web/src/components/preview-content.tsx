@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "@/lib/workspace-router";
 import { AppShell } from "@/components/app-shell";
 import { Dashboard } from "@/components/dashboard";
 import { ModulePage } from "@/components/module-page";

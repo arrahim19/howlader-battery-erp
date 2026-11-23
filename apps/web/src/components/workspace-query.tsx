@@ -1,6 +1,6 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useSearchParams } from "@/lib/workspace-router";
 import { ModulePage } from "@/components/module-page";
 
 export function WorkspaceQuery({

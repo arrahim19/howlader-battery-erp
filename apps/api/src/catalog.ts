@@ -35,6 +35,7 @@ import {
 } from "class-validator";
 import { Permissions, type AuthRequest } from "./auth";
 import { DatabaseService } from "./database.service";
+import { nativeCreate } from "./native-create";
 import { productCategoryCodes } from "./product-categories";
 
 const trim = ({ value }: { value: unknown }) =>
@@ -380,39 +381,49 @@ export class CatalogController {
     @Body(validation(CreateCategoryDto)) body: CreateCategoryDto,
     @Req() req: AuthRequest,
   ) {
-    const category = await this.db.$transaction(async (tx) => {
-      const type = await tx.productType.findUnique({
-        where: { id: body.typeId },
-      });
-      if (!type?.active || !productCategoryCodes.includes(type.code))
-        throw new BadRequestException("Select an active product type.");
-      const category = await tx.category.upsert({
-        where: { normalizedName: normalize(body.name) },
-        update: {},
-        create: { name: body.name, normalizedName: normalize(body.name) },
-      });
-      if (!category.active)
-        throw new ConflictException("This category is inactive.");
-      await tx.$queryRaw`SELECT id FROM "Category" WHERE id=${category.id}::uuid FOR UPDATE`;
-      await tx.productTypeCategory.upsert({
-        where: {
-          typeId_categoryId: { typeId: type.id, categoryId: category.id },
-        },
-        update: {},
-        create: { typeId: type.id, categoryId: category.id },
-      });
-      await tx.auditLog.create({
-        data: {
-          actorId: req.currentUser!.id,
-          action: "CATEGORY_ADDED",
-          resourceType: "Category",
-          resourceId: category.id,
-          requestId: req.requestId,
-          metadata: { typeId: type.id },
-        },
-      });
-      return category;
-    });
+    const category = await nativeCreate(
+      this.db,
+      req,
+      "MOBILE_CATEGORY_CREATE",
+      body,
+      async (tx, id) => {
+        const type = await tx.productType.findUnique({
+          where: { id: body.typeId },
+        });
+        if (!type?.active || !productCategoryCodes.includes(type.code))
+          throw new BadRequestException("Select an active product type.");
+        const category = await tx.category.upsert({
+          where: { normalizedName: normalize(body.name) },
+          update: {},
+          create: {
+            ...(id ? { id } : {}),
+            name: body.name,
+            normalizedName: normalize(body.name),
+          },
+        });
+        if (!category.active)
+          throw new ConflictException("This category is inactive.");
+        await tx.$queryRaw`SELECT id FROM "Category" WHERE id=${category.id}::uuid FOR UPDATE`;
+        await tx.productTypeCategory.upsert({
+          where: {
+            typeId_categoryId: { typeId: type.id, categoryId: category.id },
+          },
+          update: {},
+          create: { typeId: type.id, categoryId: category.id },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: req.currentUser!.id,
+            action: "CATEGORY_ADDED",
+            resourceType: "Category",
+            resourceId: category.id,
+            requestId: req.requestId,
+            metadata: { typeId: type.id },
+          },
+        });
+        return category;
+      },
+    );
     return {
       data: {
         id: category.id,
@@ -470,121 +481,131 @@ export class CatalogController {
     @Body(validation(CreateProductDto)) body: CreateProductDto,
     @Req() req: AuthRequest,
   ) {
-    const product = await this.db.$transaction(async (tx) => {
-      const type = await tx.productType.findUnique({
-        where: { id: body.typeId },
-      });
-      if (!type?.active || !productCategoryCodes.includes(type.code))
-        throw new BadRequestException("Select an active product type.");
-      const individual = type.trackingKind === TrackingKind.BATTERY_UNIT;
-      if (individual && !body.model?.trim())
-        throw new BadRequestException("Model is required for batteries.");
-      if (
-        individual &&
-        ((body.capacityAh != null &&
-          new Prisma.Decimal(body.capacityAh).lte(0)) ||
-          (body.voltage != null && new Prisma.Decimal(body.voltage).lte(0)))
-      )
-        throw new BadRequestException(
-          "Capacity and voltage must be positive when provided.",
-        );
-      if (!individual && !body.category)
-        throw new BadRequestException(
-          "Category is required for quantity-tracked products.",
-        );
-      if (!individual && (body.capacityAh != null || body.voltage != null))
-        throw new BadRequestException(
-          "Battery identification fields do not apply to this product type.",
-        );
-      const brand = body.brand
-        ? await tx.brand.upsert({
-            where: { normalizedName: normalize(body.brand) },
-            update: {},
-            create: { name: body.brand, normalizedName: normalize(body.brand) },
-          })
-        : null;
-      const category = body.category
-        ? await tx.category.upsert({
-            where: { normalizedName: normalize(body.category) },
-            update: {},
-            create: {
-              name: body.category,
-              normalizedName: normalize(body.category),
-            },
-          })
-        : null;
-      if (brand?.active === false || category?.active === false)
-        throw new BadRequestException("Select an active brand and category.");
-      if (category) {
-        await tx.$queryRaw`SELECT id FROM "Category" WHERE id=${category.id}::uuid FOR UPDATE`;
-        await tx.productTypeCategory.upsert({
-          where: {
-            typeId_categoryId: { typeId: type.id, categoryId: category.id },
-          },
-          update: {},
-          create: { typeId: type.id, categoryId: category.id },
+    const product = await nativeCreate(
+      this.db,
+      req,
+      "MOBILE_PRODUCT_CREATE",
+      body,
+      async (tx, id) => {
+        const type = await tx.productType.findUnique({
+          where: { id: body.typeId },
         });
-      }
-      const identityKey = digest(
-        JSON.stringify([
-          type.id,
-          normalize(body.name),
-          normalize(body.model ?? ""),
-          brand?.id ?? null,
-          category?.id ?? null,
-          individual && body.capacityAh != null
-            ? new Prisma.Decimal(body.capacityAh).toString()
-            : null,
-          individual && body.voltage != null
-            ? new Prisma.Decimal(body.voltage).toString()
-            : null,
-          individual ? null : normalize(body.specifications ?? ""),
-        ]),
-      );
-      const created = await tx.product.create({
-        data: {
-          identityKey,
-          name: body.name,
-          model: body.model ?? "",
-          unit: body.unit,
-          typeId: type.id,
-          brandId: brand?.id,
-          categoryId: category?.id,
-          defaultSellingPrice: body.defaultSellingPrice,
-          lowStockThreshold: body.lowStockThreshold,
-          ...(individual
-            ? {
-                batteryDetail: {
-                  create: {
-                    capacityAh: body.capacityAh ?? null,
-                    voltage: body.voltage ?? null,
-                    identificationMethod: "SERIAL",
-                    defaultWarrantyMonths: body.warrantyMonths,
+        if (!type?.active || !productCategoryCodes.includes(type.code))
+          throw new BadRequestException("Select an active product type.");
+        const individual = type.trackingKind === TrackingKind.BATTERY_UNIT;
+        if (individual && !body.model?.trim())
+          throw new BadRequestException("Model is required for batteries.");
+        if (
+          individual &&
+          ((body.capacityAh != null &&
+            new Prisma.Decimal(body.capacityAh).lte(0)) ||
+            (body.voltage != null && new Prisma.Decimal(body.voltage).lte(0)))
+        )
+          throw new BadRequestException(
+            "Capacity and voltage must be positive when provided.",
+          );
+        if (!individual && !body.category)
+          throw new BadRequestException(
+            "Category is required for quantity-tracked products.",
+          );
+        if (!individual && (body.capacityAh != null || body.voltage != null))
+          throw new BadRequestException(
+            "Battery identification fields do not apply to this product type.",
+          );
+        const brand = body.brand
+          ? await tx.brand.upsert({
+              where: { normalizedName: normalize(body.brand) },
+              update: {},
+              create: {
+                name: body.brand,
+                normalizedName: normalize(body.brand),
+              },
+            })
+          : null;
+        const category = body.category
+          ? await tx.category.upsert({
+              where: { normalizedName: normalize(body.category) },
+              update: {},
+              create: {
+                name: body.category,
+                normalizedName: normalize(body.category),
+              },
+            })
+          : null;
+        if (brand?.active === false || category?.active === false)
+          throw new BadRequestException("Select an active brand and category.");
+        if (category) {
+          await tx.$queryRaw`SELECT id FROM "Category" WHERE id=${category.id}::uuid FOR UPDATE`;
+          await tx.productTypeCategory.upsert({
+            where: {
+              typeId_categoryId: { typeId: type.id, categoryId: category.id },
+            },
+            update: {},
+            create: { typeId: type.id, categoryId: category.id },
+          });
+        }
+        const identityKey = digest(
+          JSON.stringify([
+            type.id,
+            normalize(body.name),
+            normalize(body.model ?? ""),
+            brand?.id ?? null,
+            category?.id ?? null,
+            individual && body.capacityAh != null
+              ? new Prisma.Decimal(body.capacityAh).toString()
+              : null,
+            individual && body.voltage != null
+              ? new Prisma.Decimal(body.voltage).toString()
+              : null,
+            individual ? null : normalize(body.specifications ?? ""),
+          ]),
+        );
+        const created = await tx.product.create({
+          data: {
+            identityKey,
+            ...(id ? { id } : {}),
+            name: body.name,
+            model: body.model ?? "",
+            unit: body.unit,
+            typeId: type.id,
+            brandId: brand?.id,
+            categoryId: category?.id,
+            defaultSellingPrice: body.defaultSellingPrice,
+            lowStockThreshold: body.lowStockThreshold,
+            ...(individual
+              ? {
+                  batteryDetail: {
+                    create: {
+                      capacityAh: body.capacityAh ?? null,
+                      voltage: body.voltage ?? null,
+                      identificationMethod: "SERIAL",
+                      defaultWarrantyMonths: body.warrantyMonths,
+                    },
                   },
-                },
-              }
-            : {
-                partsDetail: {
-                  create: {
-                    specifications: body.specifications || null,
-                    defaultWarrantyMonths: body.warrantyMonths,
+                }
+              : {
+                  partsDetail: {
+                    create: {
+                      specifications: body.specifications || null,
+                      defaultWarrantyMonths: body.warrantyMonths,
+                    },
                   },
-                },
-              }),
-        },
-        select: productFields,
-      });
-      await tx.auditLog.create({
-        data: {
-          actorId: req.currentUser!.id,
-          action: "PRODUCT_CREATED",
-          resourceType: "Product",
-          resourceId: created.id,
-          requestId: req.requestId,
-        },
-      });
-      return created;
-    });
+                }),
+          },
+          select: productFields,
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: req.currentUser!.id,
+            action: "PRODUCT_CREATED",
+            resourceType: "Product",
+            resourceId: created.id,
+            requestId: req.requestId,
+          },
+        });
+        return created;
+      },
+    );
     return { data: productDto(product) };
   }
 }

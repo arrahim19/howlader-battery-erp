@@ -224,9 +224,7 @@ export function ReplacementView({
   view?: string;
   data: DashboardData | null;
 }) {
-  const current = ["new", "dispatch", "receipts", "policy"].includes(view)
-    ? view
-    : "list";
+  const current = view === "new" ? "new" : "list";
   return (
     <>
       <ModuleTabs
@@ -236,9 +234,6 @@ export function ReplacementView({
         items={[
           { id: "list", label: "Replacement Cases", icon: ClipboardList },
           { id: "new", label: "New Replacement", icon: Plus },
-          { id: "dispatch", label: "Send to Company", icon: Truck },
-          { id: "receipts", label: "Received from Company", icon: Package },
-          { id: "policy", label: "Warranty Policy", icon: ShieldCheck },
         ]}
       />
       <ReplacementCases key={current} preview={preview} view={current} />

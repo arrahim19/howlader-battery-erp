@@ -1,5 +1,7 @@
 # Vercel deployment
 
+Current production address: `https://howlader-battery-erp.vercel.app`. The Android 1.0.6 production APK uses this address. Current source was deployed on 22 November 2026. Live mobile password login, expiring bearer credentials, authenticated Neon reads, the actual SQLite sync engine, durable cached records, offline cached reads and logout revocation passed. Empty JSON requests to mobile login/recovery return validation error 400. Business transactions were not created by the live check; queued writes, retry/idempotency and conflicts are covered by isolated integration/SQLite tests. Google Drive is disabled by default.
+
 The root `vercel.json` deploys two Vercel Services together: the Next.js frontend
 in `apps/web` and the NestJS API in `apps/api`. Requests under `/api/` reach the
 API with their original path, including `/api/v1`; all other paths reach the

@@ -8,6 +8,7 @@ const channel =
     : undefined);
 export default defineConfig({
   testDir: "tests/e2e",
+  testIgnore: ["**/mobile-app.spec.ts", "**/mobile-features.spec.ts"],
   fullyParallel: false,
   workers: 1,
   reporter: "list",

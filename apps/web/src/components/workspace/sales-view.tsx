@@ -39,6 +39,7 @@ import {
 } from "@/lib/api";
 import { useCatalogResource } from "@/lib/use-catalog-resource";
 import { notifyDashboardUpdate } from "@/lib/use-dashboard";
+import { useLocalReceipt } from "@/lib/use-local-receipt";
 import { useBusinessDate } from "@/lib/use-business-date";
 import { cents, decimalAmount } from "@/lib/purchase-amounts";
 import { money, shortBusinessDate as saleListDate } from "@/lib/utils";
@@ -318,6 +319,7 @@ export function SalesView({
   const [completed, setCompleted] = useState<
     (CompletedSale & { items: SaleLine[] }) | null
   >(null);
+  useLocalReceipt(completed, setCompleted, setError);
   const cart: SaleLine[] = entries.flatMap((entry) => {
     const product = options.data?.products.find(
       (product) =>
@@ -541,12 +543,6 @@ export function SalesView({
                 Retry
               </Button>
             ) : null}
-          </div>
-        ) : null}
-        {completed ? (
-          <div role="status" className="sales-success">
-            <Check size={18} />
-            <span>বিক্রয় সফল হয়েছে</span>
           </div>
         ) : null}
       </div>

@@ -60,7 +60,15 @@ run("node_modules/prisma/build/index.js", [
 run("node_modules/tsx/dist/cli.mjs", [
   "--tsconfig",
   "apps/api/tsconfig.json",
+  "scripts/migrate-shops.ts",
+]);
+run("node_modules/tsx/dist/cli.mjs", [
+  "--tsconfig",
+  "apps/api/tsconfig.json",
   "--test",
   "--test-concurrency=1",
   "tests/integration/foundation.test.ts",
+  "tests/integration/account.test.ts",
+  "tests/integration/mobile-auth.test.ts",
+  "tests/integration/shop-isolation.test.ts",
 ]);

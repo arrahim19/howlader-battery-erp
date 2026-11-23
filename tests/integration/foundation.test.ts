@@ -971,6 +971,77 @@ test("finance data is omitted for sales staff and direct finance/users/settings 
   ])
     await staff.get("/api/v1" + route).expect(403);
 });
+test("shop profile saves validated identity, preserves business defaults, and restricts writes", async () => {
+  await db.applicationSetting.deleteMany({ where: { key: "shop" } });
+  const save = async (agent: TestAgent, body: object) =>
+    agent
+      .post("/api/v1/settings/shop")
+      .set("Origin", origin())
+      .set("X-CSRF-Token", await csrf(agent))
+      .send(body);
+  const body = {
+    name: "  Test Battery House  ",
+    address: "  Dhaka  ",
+    phone: "  +8801700000000  ",
+    version: 0,
+  };
+  await request(app.getHttpServer()).get("/api/v1/shop-profile").expect(401);
+  assert.equal((await save(staff, body)).status, 403);
+  await owner
+    .post("/api/v1/settings/shop")
+    .set("Origin", origin())
+    .send(body)
+    .expect(403);
+  assert.equal((await save(owner, { ...body, name: "   " })).status, 400);
+  assert.equal(
+    (await save(owner, { ...body, phone: "1".repeat(51) })).status,
+    400,
+  );
+  assert.equal((await save(owner, { ...body, currency: "USD" })).status, 400);
+  const created = await save(owner, body);
+  assert.equal(created.status, 201);
+  assert.equal(created.body.data.version, 1);
+  assert.deepEqual(created.body.data.value, {
+    name: "Test Battery House",
+    address: "Dhaka",
+    phone: "+8801700000000",
+    currency: "BDT",
+    timezone: "Asia/Dhaka",
+  });
+  const updated = await save(owner, {
+    ...body,
+    name: "Updated Battery House",
+    address: "",
+    phone: "",
+    version: 1,
+  });
+  assert.equal(updated.status, 201);
+  assert.equal(updated.body.data.version, 2);
+  assert.equal((await save(owner, body)).status, 409);
+  const profile = await staff.get("/api/v1/shop-profile").expect(200);
+  assert.deepEqual(profile.body.data, {
+    name: "Updated Battery House",
+    address: "",
+    phone: "",
+  });
+  const stored = (await owner.get("/api/v1/settings/shop").expect(200)).body
+    .data;
+  assert.equal(stored.value.name, "Updated Battery House");
+  assert.equal(stored.value.currency, "BDT");
+  assert.equal(stored.value.timezone, "Asia/Dhaka");
+  assert.equal(
+    (await db.applicationSetting.findUniqueOrThrow({ where: { key: "shop" } }))
+      .changedById,
+    ownerId,
+  );
+  assert.equal(
+    await db.auditLog.count({
+      where: { action: "SHOP_PROFILE_UPDATED", actorId: ownerId },
+    }),
+    2,
+  );
+});
+
 test("owner dashboard returns actual empty accounting totals and validates Dhaka date ranges", async () => {
   const response = await owner
     .get("/api/v1/dashboard?from=2026-11-01&to=2026-11-13")
@@ -3523,6 +3594,18 @@ test("replacement intake loads real stock and invoice batteries and registers ea
       (item: { id: string }) => item.id === warrantyBody.id,
     ),
   );
+  await owner
+    .delete(`/api/v1/replacements/${warrantyBody.id}`)
+    .set("Origin", origin())
+    .set("X-CSRF-Token", await csrf(owner))
+    .send({ confirmed: true, version: 1 })
+    .expect(200);
+  const restoredCustomerUnit = await db.batteryUnit.findUniqueOrThrow({
+    where: { id: choice.id },
+  });
+  assert.equal(restoredCustomerUnit.custody, "CUSTOMER");
+  assert.equal(restoredCustomerUnit.ownership, "CUSTOMER");
+  assert.equal(restoredCustomerUnit.commercialState, "SOLD");
 });
 
 test("replacement quantity stays within the selected invoice, rejects shortages atomically and replays once", async () => {
@@ -4044,4 +4127,128 @@ test("simple customer statements omit cancelled invoice activity and still recon
         item.kind === "reversal" || /^(PAY|REV|RST)-/.test(item.reference),
     ),
   );
+});
+
+test("replacement deletion restores stock once, excludes cancelled cases and rejects later movements", async () => {
+  const template = await db.batteryUnit.findFirstOrThrow({
+    where: { origin: "OPENING" },
+  });
+  const supplier = await db.supplier.create({
+    data: { name: "Delete replacement " + id },
+  });
+  const unit = await db.batteryUnit.create({
+    data: {
+      productId: template.productId,
+      batchId: template.batchId,
+      origin: "OPENING",
+      internalCode: "delete-replacement-" + id,
+      condition: "GOOD",
+      commercialState: "AVAILABLE",
+    },
+  });
+  const registration = {
+    id: randomUUID(),
+    source: "BEFORE_SALE",
+    unitId: unit.id,
+    supplierId: supplier.id,
+  };
+  await owner
+    .post("/api/v1/replacements")
+    .set("Origin", origin())
+    .set("X-CSRF-Token", await csrf(owner))
+    .send(registration)
+    .expect(201);
+  const remove = async (
+    agent = owner,
+    body = { confirmed: true, version: 1 },
+  ) =>
+    agent
+      .delete("/api/v1/replacements/" + registration.id)
+      .set("Origin", origin())
+      .set("X-CSRF-Token", await csrf(agent))
+      .send(body);
+  assert.equal((await remove(staff)).status, 403);
+  assert.equal(
+    (await remove(owner, { confirmed: false, version: 1 })).status,
+    400,
+  );
+  assert.equal(
+    (await remove(owner, { confirmed: true, version: 2 })).status,
+    409,
+  );
+  const intake = await db.stockMovement.findFirstOrThrow({
+    where: {
+      batteryUnitId: unit.id,
+      posting: { sourceCode: "replacement-intake:" + registration.id },
+    },
+  });
+  const results = await Promise.all([remove(), remove()]);
+  assert.deepEqual(
+    results.map((response) => response.status),
+    [200, 200],
+  );
+  const restored = await db.batteryUnit.findUniqueOrThrow({
+    where: { id: unit.id },
+  });
+  assert.equal(restored.condition, "GOOD");
+  assert.equal(restored.custody, "SHOP");
+  assert.equal(restored.ownership, "SHOP");
+  assert.equal(restored.commercialState, "AVAILABLE");
+  assert.equal(
+    await db.stockMovement.count({ where: { reversedMovementId: intake.id } }),
+    1,
+  );
+  assert.equal(
+    await db.auditLog.count({
+      where: { action: "REPLACEMENT_DELETED", resourceId: registration.id },
+    }),
+    1,
+  );
+  const list = await owner
+    .get("/api/v1/replacements")
+    .query({ q: unit.internalCode })
+    .expect(200);
+  assert(
+    !list.body.data.items.some(
+      (item: { id: string }) => item.id === registration.id,
+    ),
+  );
+  await owner
+    .post("/api/v1/replacements/" + registration.id + "/status")
+    .set("Origin", origin())
+    .set("X-CSRF-Token", await csrf(owner))
+    .send({ status: "FAULTY", version: 2 })
+    .expect(409);
+  const options = await owner
+    .get("/api/v1/replacements/options")
+    .query({ source: "BEFORE_SALE", q: unit.internalCode })
+    .expect(200);
+  assert(
+    options.body.data.units.some((item: { id: string }) => item.id === unit.id),
+  );
+  await owner
+    .post("/api/v1/replacements")
+    .set("Origin", origin())
+    .set("X-CSRF-Token", await csrf(owner))
+    .send({ ...registration, id: (registration.id = randomUUID()) })
+    .expect(201);
+  const posting = await db.posting.create({
+    data: {
+      kind: "TEST",
+      sourceCode: "after-replacement-" + id,
+      actorId: ownerId,
+    },
+  });
+  await db.stockMovement.create({
+    data: {
+      postingId: posting.id,
+      lineNumber: 1,
+      productId: unit.productId,
+      batchId: unit.batchId,
+      batteryUnitId: unit.id,
+      quantity: 1,
+      reason: "Later movement test",
+    },
+  });
+  assert.equal((await remove()).status, 409);
 });

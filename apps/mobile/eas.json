@@ -1,0 +1,32 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "node": "26.13.1",
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "node": "26.13.1",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "preview",
+        "EXPO_PUBLIC_SERVER_URL": "https://howlader-battery-erp.vercel.app"
+      }
+    },
+    "production": {
+      "node": "26.13.1",
+      "autoIncrement": true,
+      "env": {
+        "APP_VARIANT": "production",
+        "EXPO_PUBLIC_SERVER_URL": "https://howlader-battery-erp.vercel.app"
+      }
+    }
+  }
+}

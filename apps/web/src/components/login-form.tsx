@@ -1,7 +1,7 @@
 "use client";
-import Link from "next/link";
+import Link from "@/components/workspace-link";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/workspace-router";
 import { z } from "zod";
 import {
   ArrowRight,
@@ -22,7 +22,22 @@ const schema = z.object({
   login: z.string().trim().min(1, "Enter your login.").max(120),
   password: z.string().min(1, "Enter your password.").max(256),
 });
-export function LoginForm() {
+export function LoginForm({
+  passwordChanged = false,
+  googleLogin,
+  deviceLogin = false,
+}: {
+  passwordChanged?: boolean;
+  deviceLogin?: boolean;
+  googleLogin?: {
+    busy: boolean;
+    pending: boolean;
+    onClick: () => void;
+    error?: string;
+    saved?: boolean;
+    onSaved?: () => void;
+  };
+}) {
   const router = useRouter();
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -70,7 +85,7 @@ export function LoginForm() {
             <BatteryCharging size={28} />
           </span>
           <span>
-            <strong className="block text-xl tracking-tight">Hawlader</strong>
+            <strong className="block text-xl tracking-tight">Howlader</strong>
             <small className="text-[10px] tracking-[.23em] text-slate-400">
               BATTERY ERP
             </small>
@@ -123,7 +138,7 @@ export function LoginForm() {
           </div>
         </div>
         <div className="flex items-center justify-between text-[10px] text-slate-500">
-          <span>HAWLADER BATTERY HOUSE</span>
+          <span>HOWLADER BATTERY HOUSE</span>
           <span>Built for everyday business.</span>
         </div>
         <div className="pointer-events-none absolute -right-48 bottom-20 size-96 rounded-full bg-emerald-400/5 blur-3xl" />
@@ -133,7 +148,7 @@ export function LoginForm() {
           <div className="mb-10 flex items-center gap-2 text-emerald-600 lg:hidden">
             <BatteryCharging size={30} />
             <strong className="text-lg tracking-tight text-slate-800">
-              Hawlader Battery ERP
+              Howlader Battery ERP
             </strong>
           </div>
           <span className="mb-6 inline-flex size-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-emerald-600 shadow-xs">
@@ -146,22 +161,77 @@ export function LoginForm() {
             Good to see you again.
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-slate-500">
-            Sign in to manage Hawlader Battery House.
+            Sign in to manage Howlader Battery House.
           </p>
-          <form onSubmit={submit} className="mt-9 space-y-5" noValidate>
+          {passwordChanged ? (
+            <p
+              role="status"
+              className="mt-5 rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800"
+            >
+              Password changed. Sign in with your new password.
+            </p>
+          ) : null}
+          {googleLogin ? (
+            <div className="mt-9 space-y-4">
+              <Button
+                type="button"
+                className="h-11 w-full"
+                disabled={googleLogin.busy}
+                onClick={googleLogin.onClick}
+              >
+                {googleLogin.busy ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : null}
+                Continue with Google
+                <ArrowRight className="ml-auto" />
+              </Button>
+              {googleLogin.saved && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full"
+                  onClick={googleLogin.onSaved}
+                >
+                  Open saved shop
+                </Button>
+              )}
+              {googleLogin.error && (
+                <p
+                  role="alert"
+                  className="rounded-lg bg-red-50 p-3 text-sm text-red-700"
+                >
+                  {googleLogin.error}
+                </p>
+              )}
+              <p
+                role="status"
+                className="text-sm leading-relaxed text-slate-500"
+              >
+                {googleLogin.pending
+                  ? "Google sign-in শেষ করে এই tab-এ ফিরে আসুন।"
+                  : "Sign in with your approved Gmail to open your shop and restore its Drive backup."}
+              </p>
+            </div>
+          ) : null}
+          <form
+            hidden={Boolean(googleLogin)}
+            onSubmit={submit}
+            className="mt-9 space-y-5"
+            noValidate
+          >
             <div>
               <label
                 htmlFor="login"
                 className="mb-2 block text-xs font-semibold text-slate-700"
               >
-                Login
+                Email or login
               </label>
               <Input
                 id="login"
                 name="login"
                 autoComplete="username"
                 autoCapitalize="none"
-                placeholder="Enter your login"
+                placeholder="Enter your email or login"
                 disabled={loading}
                 aria-invalid={Boolean(fields.login)}
                 aria-describedby={fields.login ? "login-error" : undefined}
@@ -222,16 +292,32 @@ export function LoginForm() {
               {!loading ? <ArrowRight className="ml-auto" /> : null}
             </Button>
           </form>
+          <Link
+            href="/forgot-password"
+            hidden={Boolean(googleLogin)}
+            className="mt-5 block text-center text-sm font-medium text-emerald-700 hover:underline"
+          >
+            Forgot password?
+          </Link>
           <div className="mt-6 flex items-center justify-center gap-1.5 text-[10px] text-slate-400">
             <ShieldCheck size={13} />
             Secure access for authorized shop staff
           </div>
-          <p className="mt-10 text-[10px] leading-relaxed text-slate-400">
-            First local setup: create the owner account with{" "}
-            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">
-              npm run db:admin
-            </code>
-            . Login instructions are in README.md.
+          <p
+            hidden={Boolean(googleLogin)}
+            className="mt-10 text-[10px] leading-relaxed text-slate-400"
+          >
+            {deviceLogin ? (
+              "প্রথমবার internet চালু রেখে sign in করুন। দোকানের ডেটা নামানো শেষ হলে এই device-এ offline login ও কাজ করতে পারবেন।"
+            ) : (
+              <>
+                First local setup: create the owner account with{" "}
+                <code className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">
+                  npm run db:admin
+                </code>
+                . Login instructions are in README.md.
+              </>
+            )}
           </p>
         </div>
       </section>

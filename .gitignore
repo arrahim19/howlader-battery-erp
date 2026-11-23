@@ -13,3 +13,10 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 packages/database/generated/
+**/credentials.json
+**/credentials/
+*.jks
+*.keystore
+
+.vercel
+.env*

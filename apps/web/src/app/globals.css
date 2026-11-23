@@ -88,8 +88,8 @@ textarea {
 }
 .brand-icon {
   display: block;
-  width: 48px;
-  height: 43px;
+  width: 30px;
+  height: 27px;
   flex-shrink: 0;
   color: #00d66c;
 }
@@ -99,8 +99,9 @@ textarea {
 }
 .brand strong {
   display: block;
-  font-size: 17px;
-  white-space: nowrap;
+  font-size: 14px;
+  white-space: normal;
+  overflow-wrap: anywhere;
   line-height: 1.25;
   font-weight: 750;
   letter-spacing: -0.6px;
@@ -347,6 +348,24 @@ textarea {
 .header-heading button svg {
   width: 23px;
   height: 23px;
+}
+.header-heading .header-pending-count {
+  width: auto;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid #f4d99d;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #854d0e;
+  font-size: 11px;
+  line-height: 24px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.header-heading .header-sync-status[data-synced] {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
 }
 .header-controls {
   display: flex;
@@ -1990,7 +2009,7 @@ textarea {
     gap: 8px;
   }
   .brand strong {
-    font-size: 16px;
+    font-size: 14px;
   }
   .brand small {
     font-size: 9px;
@@ -6844,6 +6863,56 @@ textarea {
 }
 .ledger-print-brand {
   display: none;
+}
+@media screen {
+  .app-shell:has(.replacement-list-panel) .app-body {
+    height: 100dvh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell:has(.replacement-list-panel) .top-header,
+  .app-shell:has(.replacement-list-panel) .preview-banner,
+  .app-shell:has(.replacement-list-panel)
+    .workspace-content
+    > :not(.replacement-list-panel) {
+    flex-shrink: 0;
+  }
+  .app-shell:has(.replacement-list-panel) .main-content,
+  .app-shell:has(.replacement-list-panel) .workspace-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .app-shell:has(.replacement-list-panel) .main-content {
+    padding-bottom: 8px;
+  }
+  .replacement-list-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .replacement-list-panel > .erp-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .replacement-list-panel thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f5f6fa;
+  }
+}
+@media screen and (max-width: 1023px) {
+  .app-shell:has(.replacement-list-panel) .main-content {
+    /* The shared mobile navigation already reserves the 8px gap. */
+    padding-bottom: 0;
+  }
 }
 @media screen and (max-width: 1023px) {
   /* Short lists fill the same content area as the dashboard table. */

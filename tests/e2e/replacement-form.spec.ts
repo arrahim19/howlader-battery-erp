@@ -37,7 +37,7 @@ for (const multipleInvoices of [false, true]) {
           json: {
             data: {
               suppliers: [{ id: "supplier-1", name: "Test Supplier" }],
-              units: ["HWB-000001", "MODEL-1"].includes(
+              units: ["HWB-000001", "MODEL-1", "Test Customer"].includes(
                 url.searchParams.get("q") ?? "",
               )
                 ? [
@@ -84,7 +84,7 @@ for (const multipleInvoices of [false, true]) {
           unitId: multipleInvoices ? "battery-3" : "battery-1",
           saleUnitId: multipleInvoices ? "sale-unit-3" : "sale-unit-1",
           supplierId: "supplier-1",
-          faultReason: "Battery not charging",
+          faultReason: multipleInvoices ? "" : "Battery not charging",
           quantity: 2,
         });
         expect(body.id).toMatch(/^[0-9a-f-]{36}$/);
@@ -133,26 +133,39 @@ for (const multipleInvoices of [false, true]) {
     await expect(
       page.getByLabel("Replacement Source", { exact: true }),
     ).toHaveValue("CUSTOMER_WARRANTY");
+    const search = page.getByLabel("Customer / Invoice / Model Number", {
+      exact: true,
+    });
+    await search.fill("Missing customer");
+    await expect(
+      page.getByText("No eligible batteries found for this search."),
+    ).toBeVisible();
     await page
       .getByLabel("Customer / Invoice / Model Number", { exact: true })
-      .fill(multipleInvoices ? "MODEL-1" : "HWB-000001");
+      .fill(multipleInvoices ? "Test Customer" : "HWB-000001");
     const product = page.getByLabel("Product / Model Number", { exact: false });
     await expect(product.locator("option")).toHaveCount(2);
     await expect(product.locator("option").last()).toHaveText(
       "Test Battery · MODEL-1",
     );
-    await product.selectOption("product-1");
     if (multipleInvoices) {
+      const results = page.getByRole("list", {
+        name: "Replacement search results",
+      });
+      await expect(results.getByRole("button")).toHaveCount(2);
+      await results.getByRole("button", { name: /HWB-000002/ }).click();
+      await expect(results).toBeHidden();
+      await expect(product).toHaveValue("product-1");
       const invoice = page.getByLabel("Customer / Invoice", { exact: true });
       await expect(invoice.locator("option")).toHaveCount(3);
-      await invoice.selectOption("HWB-000002");
-    }
+      await expect(invoice).toHaveValue("HWB-000002");
+    } else await product.selectOption("product-1");
     await expect(page.getByLabel("Supplier", { exact: false })).toHaveValue(
       "supplier-1",
     );
-    await page
-      .getByLabel("অভিযোগ / Fault reason", { exact: false })
-      .fill("Battery not charging");
+    const reason = page.getByLabel("অভিযোগ / Fault reason", { exact: false });
+    await expect(reason).not.toHaveAttribute("required");
+    if (!multipleInvoices) await reason.fill("Battery not charging");
     const quantity = page.getByRole("spinbutton", { name: "Qty", exact: true });
     await expect(quantity).toHaveValue("1");
     await quantity.fill("0");

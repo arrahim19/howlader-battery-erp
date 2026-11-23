@@ -1,7 +1,7 @@
 "use client";
 import { randomId } from "@/lib/random-id";
 import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/workspace-router";
 import { ArrowLeftRight, Plus } from "lucide-react";
 import { Field, Panel, workspaceHref } from "@/components/reference-ui";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ export function ReplacementForm({ preview }: { preview: boolean }) {
   const user = useSession();
   const [source, setSource] = useState("CUSTOMER_WARRANTY");
   const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selected, setSelected] = useState("");
   const [invoice, setInvoice] = useState("");
   const [supplierId, setSupplierId] = useState("");
@@ -47,6 +48,14 @@ export function ReplacementForm({ preview }: { preview: boolean }) {
         (candidate) => invoiceKey(candidate) === invoiceKey(item),
       ) === index,
   );
+  const searchResults = units.filter(
+    (item, index) =>
+      units.findIndex(
+        (candidate) =>
+          candidate.productId === item.productId &&
+          invoiceKey(candidate) === invoiceKey(item),
+      ) === index,
+  );
   const unit =
     invoices.length === 1
       ? invoices[0]
@@ -77,7 +86,6 @@ export function ReplacementForm({ preview }: { preview: boolean }) {
       saving ||
       !unit ||
       !supplierId ||
-      !reason.trim() ||
       !quantityValid
     )
       return;
@@ -138,6 +146,7 @@ export function ReplacementForm({ preview }: { preview: boolean }) {
                 setSource(event.target.value);
                 setQuantity("1");
                 setSearch("");
+                setSearchOpen(false);
                 setSelected("");
                 setInvoice("");
                 setSupplierId("");
@@ -148,21 +157,85 @@ export function ReplacementForm({ preview }: { preview: boolean }) {
               <option value="BEFORE_SALE">Before-Sale Replacement</option>
             </select>
           </Field>
-          <Field label="Customer / Invoice / Model Number">
-            <input
-              aria-label="Customer / Invoice / Model Number"
-              className="search-input"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setSelected("");
-                setInvoice("");
-                setSupplierId("");
-                setRequestId(null);
-              }}
-              placeholder="Search customer, invoice or model number..."
-            />
-          </Field>
+          <div
+            className="relative min-w-0"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget))
+                setSearchOpen(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setSearchOpen(false);
+            }}
+          >
+            <Field label="Customer / Invoice / Model Number">
+              <input
+                aria-label="Customer / Invoice / Model Number"
+                className="search-input"
+                value={search}
+                maxLength={160}
+                autoComplete="off"
+                aria-expanded={searchOpen && Boolean(search.trim())}
+                aria-controls="replacement-search-results"
+                onFocus={() => setSearchOpen(true)}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setSearchOpen(true);
+                  setSelected("");
+                  setInvoice("");
+                  setSupplierId("");
+                  setRequestId(null);
+                }}
+                placeholder="Search customer, invoice or model number..."
+              />
+            </Field>
+            {searchOpen && search.trim() ? (
+              <div
+                id="replacement-search-results"
+                className="absolute inset-x-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg"
+              >
+                {options.loading ? (
+                  <p role="status" className="p-3 text-xs text-slate-500">
+                    Searching…
+                  </p>
+                ) : options.error ? (
+                  <p role="status" className="p-3 text-xs text-red-700">
+                    Search failed. Please retry.
+                  </p>
+                ) : !searchResults.length ? (
+                  <p role="status" className="p-3 text-xs text-slate-500">
+                    No eligible batteries found for this search.
+                  </p>
+                ) : (
+                  <ul aria-label="Replacement search results">
+                    {searchResults.map((item) => (
+                      <li key={`${item.productId}-${invoiceKey(item)}`}>
+                        <button
+                          type="button"
+                          disabled={!canCreate}
+                          className="flex w-full flex-col gap-1 border-b border-slate-100 p-3 text-left text-xs hover:bg-green-50 focus-visible:bg-green-50"
+                          onClick={() => {
+                            setSelected(item.productId);
+                            setInvoice(invoiceKey(item));
+                            setSupplierId(item.supplierId ?? "");
+                            setQuantity("1");
+                            setRequestId(null);
+                            setSearchOpen(false);
+                          }}
+                        >
+                          <strong>{item.customer ?? item.label}</strong>
+                          <span className="text-slate-500">
+                            {[item.invoice, item.label]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </div>
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_88px] gap-3">
             <Field label="Product / Model Number" required>
               <select
@@ -267,11 +340,9 @@ export function ReplacementForm({ preview }: { preview: boolean }) {
                 ? "md:col-span-2 xl:col-span-3"
                 : "md:col-span-2 xl:col-span-4"
             }
-            required
           >
             <textarea
               aria-label="অভিযোগ / Fault reason"
-              required
               maxLength={2000}
               value={reason}
               onChange={(event) => {
@@ -297,7 +368,6 @@ export function ReplacementForm({ preview }: { preview: boolean }) {
               options.loading ||
               !unit ||
               !supplierId ||
-              !reason.trim() ||
               !quantityValid
             }
           >

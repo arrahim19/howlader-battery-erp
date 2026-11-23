@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import Link from "@/components/workspace-link";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -31,23 +31,11 @@ import {
   referenceModules,
 } from "@/components/reference-workspace";
 
-type UserRow = {
-  id: string;
-  name: string;
-  login: string;
-  active: boolean;
-  roles: { role: { code: string; name: string } }[];
-};
-type ShopSettings = {
-  value: {
-    name?: string;
-    currency?: string;
-    timezone?: string;
-    address?: string;
-    phone?: string;
-  };
-  version: number;
-};
+import { UserEditor, type UserRow } from "@/components/user-editor";
+import {
+  ShopProfileForm,
+  type ShopSettings,
+} from "@/components/shop-profile-form";
 export function ModulePage({
   module,
   preview = false,
@@ -127,9 +115,11 @@ export function ModulePage({
           <Badge variant={denied ? "destructive" : "secondary"}>
             {denied
               ? "Restricted"
-              : config.phase === 2
-                ? "Foundation"
-                : `Phase ${config.phase}`}
+              : module === "users"
+                ? "Accounts"
+                : config.phase === 2
+                  ? "Foundation"
+                  : `Phase ${config.phase}`}
           </Badge>
         }
       />
@@ -161,16 +151,16 @@ export function ModulePage({
           <div>
             <h2 className="text-sm font-semibold text-slate-800">
               {module === "users"
-                ? "Authentication and role protection are active"
+                ? "Manage user accounts"
                 : module === "settings"
-                  ? "Your workspace foundation is ready"
+                  ? "Manage your shop profile"
                   : "This workspace is ready for its next phase"}
             </h2>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
               {module === "users"
-                ? "The list below contains real configured users. User editing, password resets, and role administration screens are still pending."
+                ? "Edit user names, change your password, and verify an email for login and password recovery."
                 : module === "settings"
-                  ? "BDT currency and Asia/Dhaka business dates are configured. Shop settings forms, invoice customization, and warranty policy editing are not implemented yet."
+                  ? "Update your shop name, address, and phone number. Saved details also appear in the sidebar."
                   : `Navigation, layout, and backend access checks are in place. ${config.title} workflows will be implemented in Phase ${config.phase}; no transaction can be posted from this page yet.`}
             </p>
           </div>
@@ -181,37 +171,27 @@ export function ModulePage({
           <Card>
             <CardHeader>
               <CardTitle>Shop profile</CardTitle>
-              <Badge variant="secondary">Read only</Badge>
             </CardHeader>
             <CardContent>
-              <dl className="divide-y divide-slate-100 text-sm">
-                {[
-                  [
-                    "Shop name",
+              {loading ? (
+                <p role="status" className="text-sm text-slate-500">
+                  Loading shop profile…
+                </p>
+              ) : (
+                <ShopProfileForm
+                  shop={
                     preview
-                      ? "Hawlader Battery House"
-                      : (shop?.value.name ?? "—"),
-                  ],
-                  ["Currency", preview ? "BDT" : (shop?.value.currency ?? "—")],
-                  [
-                    "Business timezone",
-                    preview ? "Asia/Dhaka" : (shop?.value.timezone ?? "—"),
-                  ],
-                  [
-                    "Address & phone",
-                    [shop?.value.address, shop?.value.phone]
-                      .filter(Boolean)
-                      .join(" · ") || "Not configured",
-                  ],
-                ].map(([label, value]) => (
-                  <div className="flex justify-between gap-4 py-3" key={label}>
-                    <dt className="text-xs text-slate-500">{label}</dt>
-                    <dd className="text-right text-xs font-medium text-slate-700">
-                      {value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+                      ? {
+                          value: { name: "Hawlader Battery House" },
+                          version: 0,
+                        }
+                      : shop
+                  }
+                  disabled={denied || !!error}
+                  preview={preview}
+                  onSaved={setShop}
+                />
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -261,12 +241,17 @@ export function ModulePage({
                 {config.columns.map((column) => (
                   <TableHead key={column}>{column}</TableHead>
                 ))}
+                {module === "users" ? <TableHead>Actions</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={config.columns.length}>
+                  <TableCell
+                    colSpan={
+                      config.columns.length + (module === "users" ? 1 : 0)
+                    }
+                  >
                     <span role="status">Loading records…</span>
                   </TableCell>
                 </TableRow>
@@ -274,7 +259,14 @@ export function ModulePage({
                 filtered.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-semibold">{row.name}</TableCell>
-                    <TableCell>{row.login}</TableCell>
+                    <TableCell>
+                      {row.login}
+                      {row.email ? (
+                        <span className="mt-1 block text-xs text-slate-500">
+                          {row.email}
+                        </span>
+                      ) : null}
+                    </TableCell>
                     <TableCell>
                       {row.roles.map((entry) => entry.role.name).join(", ")}
                     </TableCell>
@@ -283,11 +275,30 @@ export function ModulePage({
                         {row.active ? "Active" : "Inactive"}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      <UserEditor
+                        row={row}
+                        onSaved={(update) =>
+                          setUsers((rows) =>
+                            rows.map((entry) =>
+                              entry.id === update.id
+                                ? { ...entry, ...update }
+                                : entry,
+                            ),
+                          )
+                        }
+                      />
+                    </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell className="p-0" colSpan={config.columns.length}>
+                  <TableCell
+                    className="p-0"
+                    colSpan={
+                      config.columns.length + (module === "users" ? 1 : 0)
+                    }
+                  >
                     <EmptyState
                       icon={denied ? LockKeyhole : Package}
                       title={

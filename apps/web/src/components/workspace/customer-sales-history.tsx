@@ -30,7 +30,7 @@ function money(value?: string | null) {
     : formatted;
 }
 
-const invoiceProductsImage = "/images/invoice-products.png";
+import { invoiceProductsImage } from "@/lib/invoice-image";
 
 function InvoicePrintSheet({
   invoice,

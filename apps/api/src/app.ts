@@ -27,6 +27,7 @@ import {
   AuthService,
   Permissions,
   Public,
+  NativeLogin,
   type AuthRequest,
 } from "./auth";
 import { settings } from "./config";
@@ -42,6 +43,13 @@ import { TransactionCancellationController } from "./transaction-cancellation";
 import { ExpensesController } from "./expenses";
 import { ReplacementsController } from "./replacements";
 import { apiProxy } from "./api-proxy";
+import { ShopSettingsController } from "./shop-settings";
+import { UserAccountController } from "./user-account";
+import { AccountRecoveryController } from "./account-recovery";
+import { AccountMailService } from "./account-mail";
+import { shopContext } from "./shop-context";
+import { BackupController, BackupService } from "./backups";
+import { MobileOfflineController } from "./mobile-offline";
 
 class LoginDto {
   @IsString() @MinLength(1) @MaxLength(120) login!: string;
@@ -77,6 +85,31 @@ class AuthController {
   }
   @Get("me") me(@Req() req: AuthRequest) {
     return { data: req.currentUser };
+  }
+  @Public()
+  @NativeLogin()
+  @Post("mobile/login")
+  async mobileLogin(
+    @Body(
+      new ValidationPipe({
+        expectedType: LoginDto,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    body: LoginDto,
+    @Req() req: AuthRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return {
+      data: await this.auth.login(
+        body.login,
+        body.password,
+        req,
+        res,
+        "bearer",
+      ),
+    };
   }
   @Post("logout") async logout(
     @Req() req: AuthRequest,
@@ -139,6 +172,8 @@ class FoundationController {
           name: true,
           login: true,
           active: true,
+          version: true,
+          email: true,
           roles: { select: { role: { select: { code: true, name: true } } } },
         },
         orderBy: { name: "asc" },
@@ -230,8 +265,13 @@ class FoundationController {
 
 @Module({
   controllers: [
+    MobileOfflineController,
+    BackupController,
     AuthController,
     FoundationController,
+    ShopSettingsController,
+    UserAccountController,
+    AccountRecoveryController,
     SuppliersController,
     CatalogController,
     PurchasesController,
@@ -243,8 +283,10 @@ class FoundationController {
     ReplacementsController,
   ],
   providers: [
+    BackupService,
     DatabaseService,
     AuthService,
+    AccountMailService,
     DashboardService,
     { provide: APP_GUARD, useClass: AccessGuard },
   ],
@@ -259,13 +301,27 @@ export async function createApp() {
   app.setGlobalPrefix("api/v1");
   app.use(helmet());
   app.use(cookieParser());
+  const backups = app.get(BackupService);
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.on("finish", () => {
+      if (
+        ["POST", "PUT", "PATCH", "DELETE"].includes(req.method) &&
+        res.statusCode >= 200 &&
+        res.statusCode < 300 &&
+        !req.path.startsWith("/api/v1/auth/") &&
+        !req.path.startsWith("/api/v1/backups/")
+      )
+        backups.changed();
+    });
+    next();
+  });
   app.use(apiProxy(settings().proxySecret));
   app.use((req: Request, res: Response, next: NextFunction) => {
     const requestId = randomUUID();
     (req as AuthRequest).requestId = requestId;
     res.setHeader("X-Request-Id", requestId);
     res.setHeader("Cache-Control", "private, no-store");
-    next();
+    shopContext.run({}, () => next());
   });
   app.useGlobalFilters(new ApiErrorFilter());
   app.enableShutdownHooks();

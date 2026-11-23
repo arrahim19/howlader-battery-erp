@@ -121,9 +121,8 @@ test("replacement rows save status, update summaries, retain failures and surviv
     "Could not save status",
   );
   await expect(dropdown).toHaveValue("DELIVERED");
-  await page.getByRole("button", { name: "Details for REP-001" }).click();
-  await expect(page.locator(".erp-details")).toContainText("Customer One");
-  await expect(page.locator(".erp-details")).toContainText("Delivered");
+  await expect(page.getByText("Replacement Details", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Details for REP-001" })).toHaveCount(0);
   await page.reload();
   await expect(dropdown).toHaveValue("DELIVERED");
   await page

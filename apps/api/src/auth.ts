@@ -21,12 +21,16 @@ import type { CurrentUser } from "../../../packages/api-client/src";
 import { DatabaseService } from "./database.service";
 import { settings } from "./config";
 import { readSessionIdentity } from "./auth-session";
+import { bindShop } from "./shop-context";
 
 // Load the native CommonJS package directly; Vercel's generated import shim
 // does not preserve Argon2's hash/verify exports.
 const argon2 = createRequire(__filename)("argon2") as typeof import("argon2");
 
 export const Public = () => SetMetadata("public", true);
+// Native public auth endpoints do not consume browser cookie credentials.
+export const NativePublic = () => SetMetadata("nativePublic", true);
+export const NativeLogin = NativePublic;
 export const Permissions = (...permissions: string[]) =>
   SetMetadata("permissions", permissions);
 export const digest = (value: string) =>
@@ -36,11 +40,16 @@ export const passwordOptions = {
   timeCost: 2,
   parallelism: 1,
 };
+export const hashPassword = (password: string) =>
+  argon2.hash(password, passwordOptions);
+export const verifyPassword = (hash: string, password: string) =>
+  argon2.verify(hash, password);
 export type AuthRequest = Request & {
   currentUser?: CurrentUser;
   sessionId?: string;
   requestId: string;
   trustedClientIp?: string;
+  authTransport?: "cookie" | "bearer";
 };
 
 function equal(a: string, b: string) {
@@ -62,35 +71,57 @@ export class AuthService {
   }
 
   async session(req: AuthRequest): Promise<CurrentUser | null> {
-    const raw: unknown = req.cookies?.[this.config.cookieName];
+    const authorization = req.get("Authorization");
+    const bearer = authorization?.match(/^Bearer ([a-f0-9]{64})$/i);
+    if (authorization && !bearer) return null;
+    const raw: unknown = bearer?.[1] ?? req.cookies?.[this.config.cookieName];
     if (typeof raw !== "string" || !/^[a-f0-9]{64}$/.test(raw)) return null;
-    const session = await readSessionIdentity(this.db, digest(raw));
+    const scope = await this.db.findAcrossShops((client) =>
+      readSessionIdentity(client, digest(raw)),
+    );
+    const session = scope?.record;
     const now = Date.now();
     if (
       !session ||
       session.revokedAt ||
       !session.active ||
       session.expiresAt.getTime() <= now ||
-      session.lastSeenAt.getTime() + this.config.idleMinutes * 60000 <= now ||
+      (!session.deviceSession &&
+        session.lastSeenAt.getTime() + this.config.idleMinutes * 60000 <=
+          now) ||
+      (session.deviceSession && !bearer) ||
       session.createdAt.getTime() < session.passwordChangedAt.getTime()
     )
       return null;
+    if (!scope) return null;
+    bindShop(scope.shop);
     const updated = await this.db.session.updateMany({
       where: {
         id: session.id,
         revokedAt: null,
         expiresAt: { gt: new Date(now) },
       },
-      data: { lastSeenAt: new Date(now) },
+      data: {
+        lastSeenAt: new Date(now),
+        ...(session.deviceSession
+          ? { expiresAt: new Date(now + 90 * 86400000) }
+          : {}),
+      },
     });
     if (updated.count !== 1) return null;
     req.sessionId = session.id;
+    req.authTransport = bearer ? "bearer" : "cookie";
     req.currentUser = {
       id: session.userId,
       name: session.name,
       login: session.login,
       roles: session.roles,
       permissions: session.permissions,
+      shop: {
+        id: scope.shop.id,
+        name: scope.shop.name,
+        branchName: scope.shop.branchName,
+      },
     };
     return req.currentUser;
   }
@@ -100,7 +131,9 @@ export class AuthService {
     if (user)
       return {
         token: this.tokenForSession(
-          req.cookies[this.config.cookieName] as string,
+          req.authTransport === "bearer"
+            ? req.get("Authorization")!.slice(7)
+            : (req.cookies[this.config.cookieName] as string),
         ),
       };
     const payload =
@@ -152,8 +185,8 @@ export class AuthService {
       throw new ForbiddenException("CSRF token invalid.");
   }
 
-  private async rateLimit(key: string, limit: number) {
-    const rows = await this.db.$queryRaw<{ count: number }[]>`
+  async rateLimit(key: string, limit: number) {
+    const rows = await this.db.global.$queryRaw<{ count: number }[]>`
       INSERT INTO "LoginAttempt" ("id", "key", "count", "windowStartedAt", "createdAt", "updatedAt")
       VALUES (gen_random_uuid(), ${key}, 1, NOW(), NOW(), NOW())
       ON CONFLICT ("key") DO UPDATE SET
@@ -173,6 +206,7 @@ export class AuthService {
     password: string,
     req: AuthRequest,
     res: Response,
+    transport: "cookie" | "bearer" = "cookie",
   ) {
     const normalized = login.trim().toLowerCase();
     const key = (value: string) =>
@@ -180,9 +214,17 @@ export class AuthService {
     // A forwarded client IP is trusted only after validating the Worker secret.
     await this.rateLimit(key("ip:" + (req.trustedClientIp ?? req.ip)), 60);
     await this.rateLimit(key("login:" + normalized), 10);
-    const user = await this.db.user.findUnique({
-      where: { login: normalized },
-    });
+    const scope = await this.db.findAcrossShops((client) =>
+      client.user.findFirst({
+        where: {
+          OR: [
+            { login: normalized },
+            { email: normalized, emailVerifiedAt: { not: null } },
+          ],
+        },
+      }),
+    );
+    const user = scope?.record;
     const valid = await argon2.verify(
       user?.passwordHash ?? (await this.dummyHash),
       password,
@@ -197,11 +239,16 @@ export class AuthService {
       });
       throw new UnauthorizedException("Invalid login or password.");
     }
+    if (!scope) throw new UnauthorizedException("Invalid login or password.");
+    bindShop(scope.shop);
     const raw = randomBytes(32).toString("hex");
     const csrfToken = this.tokenForSession(raw);
     const now = new Date();
     const expiry = new Date(
-      now.getTime() + this.config.absoluteHours * 3600000,
+      now.getTime() +
+        (transport === "bearer"
+          ? 90 * 86400000
+          : this.config.absoluteHours * 3600000),
     );
     await this.db.$transaction(async (tx) => {
       // Lock and recheck: a simultaneous password reset/deactivation cannot issue a valid session.
@@ -211,7 +258,10 @@ export class AuthService {
       });
       if (!current.active || current.passwordHash !== user.passwordHash)
         throw new UnauthorizedException("Invalid login or password.");
-      const previous: unknown = req.cookies?.[this.config.cookieName];
+      const previous: unknown =
+        transport === "cookie"
+          ? req.cookies?.[this.config.cookieName]
+          : undefined;
       if (typeof previous === "string")
         await tx.session.updateMany({
           where: { tokenHash: digest(previous), revokedAt: null },
@@ -220,6 +270,7 @@ export class AuthService {
       await tx.session.create({
         data: {
           userId: user.id,
+          deviceSession: transport === "bearer",
           tokenHash: digest(raw),
           csrfTokenHash: digest(csrfToken),
           expiresAt: expiry,
@@ -235,6 +286,8 @@ export class AuthService {
         },
       });
     });
+    if (transport === "bearer")
+      return { accessToken: raw, expiresAt: expiry.toISOString() };
     res.cookie(this.config.cookieName, raw, {
       httpOnly: true,
       secure: this.config.production,
@@ -267,6 +320,7 @@ export class AuthService {
         },
       });
     });
+    if (req.authTransport === "bearer") return;
     res.clearCookie(this.config.cookieName, {
       httpOnly: true,
       secure: this.config.production,
@@ -289,13 +343,24 @@ export class AccessGuard implements CanActivate {
       context.getClass(),
     ]);
     const unsafe = !["GET", "HEAD", "OPTIONS"].includes(req.method);
-    if (unsafe && !settings().allowedOrigins.includes(req.get("Origin") ?? ""))
+    const nativeLogin = this.reflector.getAllAndOverride<boolean>(
+      "nativePublic",
+      [context.getHandler(), context.getClass()],
+    );
+    const explicitBearer = /^Bearer [a-f0-9]{64}$/i.test(
+      req.get("Authorization") ?? "",
+    );
+    const origin = req.get("Origin");
+    if (unsafe && origin && !settings().allowedOrigins.includes(origin))
+      throw new ForbiddenException("Request origin not allowed.");
+    if (unsafe && !origin && !explicitBearer && !nativeLogin)
       throw new ForbiddenException("Request origin not allowed.");
     if (!publicRoute && !(await this.auth.session(req)))
       throw new UnauthorizedException("Please sign in.");
     // Reauthentication may arrive with an existing session-bound CSRF token.
-    if (publicRoute && unsafe) await this.auth.session(req);
-    if (unsafe) await this.auth.checkCsrf(req, Boolean(req.currentUser));
+    if (publicRoute && unsafe && !nativeLogin) await this.auth.session(req);
+    if (unsafe && !nativeLogin && req.authTransport !== "bearer")
+      await this.auth.checkCsrf(req, Boolean(req.currentUser));
     const permissions =
       this.reflector.getAllAndOverride<string[]>("permissions", [
         context.getHandler(),

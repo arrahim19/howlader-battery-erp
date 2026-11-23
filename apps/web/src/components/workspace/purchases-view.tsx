@@ -1,6 +1,6 @@
 "use client";
 import { randomId } from "@/lib/random-id";
-import Link from "next/link";
+import Link from "@/components/workspace-link";
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
@@ -30,6 +30,7 @@ import {
 } from "@/lib/api";
 import { useCatalogResource } from "@/lib/use-catalog-resource";
 import { notifyDashboardUpdate } from "@/lib/use-dashboard";
+import { useLocalReceipt } from "@/lib/use-local-receipt";
 import { useBusinessDate } from "@/lib/use-business-date";
 import { cents, decimalAmount } from "@/lib/purchase-amounts";
 import { money, shortBusinessDate } from "@/lib/utils";
@@ -160,6 +161,7 @@ export function PurchasesView({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [received, setReceived] = useState<ReceivedPurchase | null>(null);
+  useLocalReceipt(received, setReceived, setError);
   const requestKey = useRef<string | null>(draft?.requestKey ?? null);
   const requestBody = useRef(draft?.requestBody ?? "");
   const submitting = useRef(false);
@@ -454,7 +456,9 @@ export function PurchasesView({
             role="status"
             className="mb-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800"
           >
-            Successful
+            {received.syncStatus === "PENDING"
+              ? "ডিভাইসে ক্রয় সেভ হয়েছে · Online হলে sync হবে"
+              : "Successful"}
             <Button
               type="button"
               variant="ghost"

@@ -35,6 +35,7 @@ export type {
   ExpenseOptions,
 } from "../../../../packages/api-client/src";
 export const SESSION_EXPIRED_EVENT = "hawlader:session-expired";
+export const CURRENT_USER_CHANGED_EVENT = "hawlader:current-user-changed";
 export const RESOURCE_CHANGED_EVENT = "hawlader:resources-changed";
 export class ApiError extends Error {
   constructor(
@@ -44,7 +45,28 @@ export class ApiError extends Error {
     super(message);
   }
 }
+type DeviceRequest = (route: string, init?: RequestInit) => Promise<unknown>;
+let deviceRequest: { request: DeviceRequest } | null = null;
+export function connectDeviceApi(request: DeviceRequest) {
+  const binding = { request };
+  deviceRequest = binding;
+  return () => {
+    if (deviceRequest === binding) deviceRequest = null;
+  };
+}
 export async function api<T>(route: string, init?: RequestInit): Promise<T> {
+  if (deviceRequest) {
+    const data = await deviceRequest.request(route, init);
+    if (
+      init?.method &&
+      init.method.toUpperCase() !== "GET" &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new Event(RESOURCE_CHANGED_EVENT));
+      window.dispatchEvent(new Event("hawlader:dashboard-update"));
+    }
+    return data as T;
+  }
   const response = await fetch("/api/v1" + route, {
     ...init,
     credentials: "same-origin",
@@ -69,6 +91,7 @@ export async function api<T>(route: string, init?: RequestInit): Promise<T> {
   if (
     init?.method &&
     init.method.toUpperCase() !== "GET" &&
+    !route.startsWith("/auth/") &&
     typeof window !== "undefined"
   ) {
     window.dispatchEvent(new Event(RESOURCE_CHANGED_EVENT));

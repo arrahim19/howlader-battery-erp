@@ -106,12 +106,23 @@ enum PaymentMethod {
   OTHER
 }
 
+model Shop {
+  id         String   @id @default(uuid()) @db.Uuid
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  name       String
+  branchName String   @unique
+  schemaName String   @unique
+  active     Boolean  @default(true)
+}
+
 model User {
   id                                  String                          @id @default(uuid()) @db.Uuid
   createdAt                           DateTime                        @default(now()) @db.Timestamptz(3)
   updatedAt                           DateTime                        @updatedAt @db.Timestamptz(3)
   name                                String
   login                               String                          @unique
+  email                               String?                         @unique
+  emailVerifiedAt                     DateTime?                       @db.Timestamptz(3)
   passwordHash                        String
   active                              Boolean                         @default(true)
   passwordChangedAt                   DateTime                        @default(now()) @db.Timestamptz(3)
@@ -122,9 +133,25 @@ model User {
   postings                            Posting[]                       @relation("Posting_actor")
   idempotencyRecords                  IdempotencyRecord[]             @relation("IdempotencyRecord_actor")
   settingsChanges                     ApplicationSetting[]            @relation("ApplicationSetting_changedBy")
+  emailTokens                         AccountEmailToken[]
+}
+
+model AccountEmailToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  tokenHash String   @unique
+  purpose   String
+  email     String
+  expiresAt DateTime @db.Timestamptz(3)
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, purpose])
+  @@index([expiresAt])
 }
 
 model Session {
+  deviceSession Boolean @default(false)
   id            String    @id @default(uuid()) @db.Uuid
   createdAt     DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt     DateTime  @updatedAt @db.Timestamptz(3)

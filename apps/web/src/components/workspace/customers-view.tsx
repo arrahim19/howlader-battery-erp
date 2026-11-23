@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/workspace-router";
 import { ClipboardList, Plus, Search, Users } from "lucide-react";
 import { ModuleTabs, Panel, workspaceHref } from "@/components/reference-ui";
 import { Button } from "@/components/ui/button";
