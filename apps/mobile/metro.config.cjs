@@ -14,6 +14,7 @@ config.resolver.resolveRequest = (context, name, platform) => {
     "@/lib/api": "api.ts",
     "@/lib/invoice-image": "invoice-image.ts",
     "@/lib/brand-image": "brand-image.ts",
+    "@/lib/print-document": "print-document.ts",
     "@/components/session-provider": "session.tsx",
   };
   if (aliases[name]) name = path.join(adapters, aliases[name]);

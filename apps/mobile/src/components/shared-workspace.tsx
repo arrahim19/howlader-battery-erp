@@ -13,6 +13,8 @@ import { ApiError, normalizeOrigin, request } from "../lib/client";
 import type { BridgeRequest, BridgeResult } from "../shared-web/types";
 import { offlineSalt } from "../lib/offline/auth";
 import type { PasswordVerifier } from "../lib/offline/password";
+import { printInvoice } from "../lib/print-invoice";
+import type { InvoicePrintDocument } from "../../../web/src/lib/invoice-print-document";
 
 export function SharedWorkspace({ pathname }: { pathname: string }) {
   const auth = useSession();
@@ -20,6 +22,13 @@ export function SharedWorkspace({ pathname }: { pathname: string }) {
   const navigation = useRootNavigationState();
   const [origin, setOrigin] = useState(
     process.env.EXPO_PUBLIC_SERVER_URL ?? "http://10.0.2.2:3000",
+  );
+  const onPrint = useCallback(
+    async (document: InvoicePrintDocument) => {
+      if (!auth.user) throw new Error("Please sign in before printing.");
+      await printInvoice(document);
+    },
+    [auth.user],
   );
   const navigate = useCallback(
     async (href: string, replace = false) => {
@@ -214,6 +223,7 @@ export function SharedWorkspace({ pathname }: { pathname: string }) {
         syncError={auth.syncStatus.error}
         onNavigate={navigate}
         onRequest={onRequest}
+        onPrint={onPrint}
         onOriginChange={async (value) => {
           setOrigin(value);
         }}

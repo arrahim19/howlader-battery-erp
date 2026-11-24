@@ -2,11 +2,12 @@ param(
   [string]$BuildDirectory = 'C:\hb-build\erp',
   [string]$Architectures = '',
   [ValidateSet('preview','stable','production')]
-  [string]$Variant = 'preview'
+  [string]$Variant = 'stable'
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Architectures) {
-  $Architectures = if ($Variant -eq 'preview') { 'arm64-v8a,armeabi-v7a,x86_64,x86' } else { 'arm64-v8a,armeabi-v7a' }
+  # Phone releases include one ABI. Opt into preview for emulator/universal APKs.
+  $Architectures = if ($Variant -eq 'preview') { 'arm64-v8a,armeabi-v7a,x86_64,x86' } else { 'arm64-v8a' }
 }
 function Invoke-AndroidNative {
   param([string]$File, [string[]]$Arguments)
@@ -99,6 +100,7 @@ try {
   $output = Join-Path $outputDirectory $outputName
   Copy-Item -LiteralPath $apkSource -Destination $output -Force
   Write-Output "Local APK ready: $output"
+  Write-Output "Android architectures: $Architectures"
   Write-Output ('SHA256: ' + (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash)
 } finally {
   Set-Location -LiteralPath $savedLocation

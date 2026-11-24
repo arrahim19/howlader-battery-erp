@@ -20,6 +20,8 @@ import { MobileUserContext } from "./session";
 import { connectNativeApi } from "./api";
 import type { BridgeRequest, BridgeResult } from "./types";
 import { LocalData } from "./local-data";
+import { connectNativePrint } from "./print-document";
+import type { InvoicePrintDocument } from "../../../web/src/lib/invoice-print-document";
 
 export default function Workspace({
   pathname,
@@ -35,6 +37,7 @@ export default function Workspace({
   nativeViewport = false,
   onRequest,
   onNavigate,
+  onPrint,
 }: {
   dom?: DOMProps;
   pathname: string;
@@ -50,6 +53,7 @@ export default function Workspace({
   nativeViewport?: boolean;
   onRequest: (request: BridgeRequest) => Promise<BridgeResult>;
   onNavigate: (href: string, replace?: boolean) => Promise<void>;
+  onPrint: (document: InvoicePrintDocument) => Promise<void>;
   onOriginChange: (origin: string) => Promise<void>;
 }) {
   // The bridge deserializes objects again on every native status update.
@@ -104,6 +108,10 @@ export default function Workspace({
     connectNativeApi(onRequest);
     return () => connectNativeApi(null);
   }, [onRequest]);
+  useLayoutEffect(() => {
+    connectNativePrint(nativeViewport ? onPrint : null);
+    return () => connectNativePrint(null);
+  }, [nativeViewport, onPrint]);
   useLayoutEffect(() => {
     document.documentElement.toggleAttribute(
       "data-native-workspace",

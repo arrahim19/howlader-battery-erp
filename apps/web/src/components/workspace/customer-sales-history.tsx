@@ -17,6 +17,7 @@ import { useSession } from "@/components/session-provider";
 import { CustomerEditor } from "./customer-editor";
 import { businessDate, money as formatMoney } from "@/lib/utils";
 import { setInvoicePrintTitle } from "@/lib/invoice-print-title";
+import { printDocument } from "@/lib/print-document";
 
 function money(value?: string | null) {
   const formatted = formatMoney(value);
@@ -465,7 +466,7 @@ export function CustomerSalesHistoryDialog({
                           await new Promise<void>((resolve) => {
                             requestAnimationFrame(() => setTimeout(resolve, 0));
                           });
-                          window.print();
+                          await printDocument();
                         } catch (error) {
                           setPrintingInvoice(null);
                           setPrintError(

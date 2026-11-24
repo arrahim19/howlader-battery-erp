@@ -44,16 +44,16 @@ const config: ExpoConfig = {
   slug: "hawlader-battery-erp",
   owner: "arrahim19",
   scheme: "hawladerbattery",
-  version: "1.0.9",
+  version: "1.0.10",
   orientation: "portrait",
   userInterfaceStyle: "light",
   icon: "./assets/icon.png",
   android: {
     package: "com.hawlader.batteryerp",
-    versionCode: 10,
+    versionCode: 11,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
-      backgroundColor: "#12272c",
+      backgroundColor: "#ffffff",
     },
     predictiveBackGestureEnabled: true,
   },
@@ -64,9 +64,9 @@ const config: ExpoConfig = {
     [
       "expo-splash-screen",
       {
-        image: "./assets/icon.png",
+        image: "./assets/splash-icon.png",
         imageWidth: 100,
-        backgroundColor: "#12272c",
+        backgroundColor: "#ffffff",
       },
     ],
     [
