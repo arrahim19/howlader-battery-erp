@@ -4,6 +4,9 @@
     "strict": true,
     "incremental": true,
     "tsBuildInfoFile": ".expo/cache/typecheck.tsbuildinfo",
-    "paths": { "@/*": ["../web/src/*"] }
+    "paths": {
+      "@/lib/brand-image": ["./src/shared-web/brand-image.ts"],
+      "@/*": ["../web/src/*"]
+    }
   }
 }

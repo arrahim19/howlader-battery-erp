@@ -96,6 +96,14 @@ class CreateProductDto {
   @MaxLength(2000)
   specifications?: string;
 }
+class UpdateProductDto {
+  @IsInt() @Min(1) version!: number;
+  @Transform(trim) @IsString() @MinLength(1) @MaxLength(160) name!: string;
+  @Transform(trim) @IsString() @MaxLength(160) model!: string;
+  @Transform(trim) @IsString() @MinLength(1) @MaxLength(30) unit!: string;
+  @Matches(/^\d{1,18}(?:\.\d{1,2})?$/) defaultSellingPrice!: string;
+  @IsInt() @Min(0) @Max(600) warrantyMonths!: number;
+}
 const validation = (expectedType: new () => object) =>
   new ValidationPipe({
     expectedType,
@@ -107,6 +115,7 @@ const activeWhere = (status: string): Prisma.ProductWhereInput =>
   status === "all" ? {} : { active: status === "active" };
 const productFields = {
   id: true,
+  version: true,
   name: true,
   model: true,
   unit: true,
@@ -473,6 +482,164 @@ export class CatalogController {
       });
     });
     return { data: { deleted: true } };
+  }
+
+  @Get("products/:id")
+  async product(@Param("id", ParseUUIDPipe) id: string) {
+    const product = await this.db.product.findUnique({
+      where: { id },
+      select: {
+        ...productFields,
+        _count: {
+          select: { batches: true, purchaseItems: true, saleItems: true },
+        },
+      },
+    });
+    if (!product) throw new NotFoundException("Product not found.");
+    const { _count, ...row } = product;
+    return {
+      data: {
+        ...productDto(row),
+        unitEditable:
+          !_count.batches && !_count.purchaseItems && !_count.saleItems,
+      },
+    };
+  }
+
+  @Post("products/:id")
+  @Permissions("catalog.write")
+  async update(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(validation(UpdateProductDto)) body: UpdateProductDto,
+    @Req() req: AuthRequest,
+  ) {
+    try {
+      const product = await this.db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${id}::uuid FOR UPDATE`;
+        const current = await tx.product.findUnique({
+          where: { id },
+          select: productFields,
+        });
+        if (!current) throw new NotFoundException("Product not found.");
+        if (!current.active)
+          throw new BadRequestException("Inactive products cannot be edited.");
+        if (current.version !== body.version)
+          throw new ConflictException(
+            "Product changed. Close and reopen the editor before saving again.",
+          );
+        if (body.unit !== current.unit) {
+          const references = await tx.product.findUniqueOrThrow({
+            where: { id },
+            select: {
+              _count: {
+                select: { batches: true, purchaseItems: true, saleItems: true },
+              },
+            },
+          });
+          if (Object.values(references._count).some((count) => count > 0)) {
+            throw new ConflictException(
+              "The unit cannot be changed after stock or transactions have been recorded.",
+            );
+          }
+        }
+        const individual =
+          current.type.trackingKind === TrackingKind.BATTERY_UNIT;
+        if (individual && !body.model)
+          throw new BadRequestException("Model is required for batteries.");
+        const category = await tx.category.findFirst({
+          where: {
+            normalizedName: normalize(body.name),
+            active: true,
+            types: { some: { typeId: current.type.id } },
+          },
+        });
+        if (!category)
+          throw new BadRequestException(
+            "Select a product name in this product category.",
+          );
+        await tx.$queryRaw`SELECT id FROM "Category" WHERE id=${category.id}::uuid FOR UPDATE`;
+        const availableName = await tx.category.findFirst({
+          where: {
+            id: category.id,
+            active: true,
+            types: { some: { typeId: current.type.id } },
+          },
+          select: { id: true },
+        });
+        if (!availableName)
+          throw new BadRequestException(
+            "Select a product name in this product category.",
+          );
+        // Match creation identity rules without changing tracking kind or stock records.
+        const identityKey = digest(
+          JSON.stringify([
+            current.type.id,
+            normalize(category.name),
+            normalize(body.model),
+            current.brand?.id ?? null,
+            category.id,
+            individual && current.batteryDetail?.capacityAh != null
+              ? current.batteryDetail.capacityAh.toString()
+              : null,
+            individual && current.batteryDetail?.voltage != null
+              ? current.batteryDetail.voltage.toString()
+              : null,
+            individual
+              ? null
+              : normalize(current.partsDetail?.specifications ?? ""),
+          ]),
+        );
+        const updated = await tx.product.update({
+          where: { id },
+          data: {
+            name: category.name,
+            model: body.model,
+            unit: body.unit,
+            categoryId: category.id,
+            identityKey,
+            defaultSellingPrice: body.defaultSellingPrice,
+            version: { increment: 1 },
+            ...(individual
+              ? {
+                  batteryDetail: {
+                    update: { defaultWarrantyMonths: body.warrantyMonths },
+                  },
+                }
+              : {
+                  partsDetail: {
+                    update: { defaultWarrantyMonths: body.warrantyMonths },
+                  },
+                }),
+          },
+          select: productFields,
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: req.currentUser!.id,
+            action: "PRODUCT_UPDATED",
+            resourceType: "Product",
+            resourceId: id,
+            requestId: req.requestId,
+            metadata: {
+              before: productDto(current),
+              after: productDto(updated),
+            } as Prisma.InputJsonObject,
+          },
+        });
+        return updated;
+      });
+      return { data: productDto(product) };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new ConflictException(
+          "A product with this name and model already exists.",
+        );
+      }
+      throw error;
+    }
   }
 
   @Post("products")

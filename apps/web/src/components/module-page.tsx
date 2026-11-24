@@ -107,22 +107,24 @@ export function ModulePage({
   );
   return (
     <>
-      <PageHeader
-        eyebrow="WORKSPACE"
-        title={config.title}
-        description={config.description}
-        actions={
-          <Badge variant={denied ? "destructive" : "secondary"}>
-            {denied
-              ? "Restricted"
-              : module === "users"
-                ? "Accounts"
-                : config.phase === 2
-                  ? "Foundation"
-                  : `Phase ${config.phase}`}
-          </Badge>
-        }
-      />
+      {module !== "users" ? (
+        <PageHeader
+          eyebrow="WORKSPACE"
+          title={config.title}
+          description={config.description}
+          actions={
+            <Badge variant={denied ? "destructive" : "secondary"}>
+              {denied
+                ? "Restricted"
+                : module === "users"
+                  ? "Accounts"
+                  : config.phase === 2
+                    ? "Foundation"
+                    : `Phase ${config.phase}`}
+            </Badge>
+          }
+        />
+      ) : null}
       {error ? (
         <Card className="mb-5 border-amber-200 bg-amber-50">
           <CardContent className="pt-5">
@@ -143,29 +145,31 @@ export function ModulePage({
           </Button>
         </div>
       ) : null}
-      <Card className="mb-5 border-blue-100 bg-blue-50/50">
-        <CardContent className="flex items-start gap-3 pt-5">
-          <span className="rounded-lg bg-white p-2 text-blue-500">
-            <Construction size={19} />
-          </span>
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">
-              {module === "users"
-                ? "Manage user accounts"
-                : module === "settings"
-                  ? "Manage your shop profile"
-                  : "This workspace is ready for its next phase"}
-            </h2>
-            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
-              {module === "users"
-                ? "Edit user names, change your password, and verify an email for login and password recovery."
-                : module === "settings"
-                  ? "Update your shop name, address, and phone number. Saved details also appear in the sidebar."
-                  : `Navigation, layout, and backend access checks are in place. ${config.title} workflows will be implemented in Phase ${config.phase}; no transaction can be posted from this page yet.`}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      {module !== "users" ? (
+        <Card className="mb-5 border-blue-100 bg-blue-50/50">
+          <CardContent className="flex items-start gap-3 pt-5">
+            <span className="rounded-lg bg-white p-2 text-blue-500">
+              <Construction size={19} />
+            </span>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">
+                {module === "users"
+                  ? "Manage user accounts"
+                  : module === "settings"
+                    ? "Manage your shop profile"
+                    : "This workspace is ready for its next phase"}
+              </h2>
+              <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
+                {module === "users"
+                  ? "Edit user names, change your password, and verify an email for login and password recovery."
+                  : module === "settings"
+                    ? "Update your shop name, address, and phone number. Saved details also appear in the sidebar."
+                    : `Navigation, layout, and backend access checks are in place. ${config.title} workflows will be implemented in Phase ${config.phase}; no transaction can be posted from this page yet.`}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
       {module === "settings" ? (
         <div className="grid gap-5 md:grid-cols-2">
           <Card>

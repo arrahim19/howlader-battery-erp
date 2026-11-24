@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export type ShopSettings = {
-  value: { name?: string; address?: string; phone?: string };
+  value: {
+    name?: string;
+    tagLine?: string;
+    tagLine2?: string;
+    address?: string;
+    phone?: string;
+  };
   version: number;
 };
 
@@ -22,6 +28,8 @@ export function ShopProfileForm({
   onSaved: (shop: ShopSettings) => void;
 }) {
   const [name, setName] = useState(shop?.value?.name ?? "");
+  const [tagLine, setTagLine] = useState(shop?.value?.tagLine ?? "");
+  const [tagLine2, setTagLine2] = useState(shop?.value?.tagLine2 ?? "");
   const [address, setAddress] = useState(shop?.value?.address ?? "");
   const [phone, setPhone] = useState(shop?.value?.phone ?? "");
   const [saving, setSaving] = useState(false);
@@ -29,6 +37,8 @@ export function ShopProfileForm({
   const [saved, setSaved] = useState(false);
   const dirty =
     name !== (shop?.value?.name ?? "") ||
+    tagLine !== (shop?.value?.tagLine ?? "") ||
+    tagLine2 !== (shop?.value?.tagLine2 ?? "") ||
     address !== (shop?.value?.address ?? "") ||
     phone !== (shop?.value?.phone ?? "");
 
@@ -41,11 +51,15 @@ export function ShopProfileForm({
     try {
       const updated = await post<ShopSettings>("/settings/shop", {
         name: name.trim(),
+        tagLine: tagLine.trim(),
+        tagLine2: tagLine2.trim(),
         address: address.trim(),
         phone: phone.trim(),
         version: shop?.version ?? 0,
       });
       setName(updated.value.name ?? "");
+      setTagLine(updated.value.tagLine ?? "");
+      setTagLine2(updated.value.tagLine2 ?? "");
       setAddress(updated.value.address ?? "");
       setPhone(updated.value.phone ?? "");
       onSaved(updated);
@@ -76,7 +90,43 @@ export function ShopProfileForm({
           />
         </label>
         <label className="block space-y-2 text-xs text-slate-500">
-          <span>Address</span>
+          <span>Tag line 1</span>
+          <textarea
+            aria-label="Tag line 1"
+            value={tagLine}
+            onChange={(event) => {
+              setTagLine(event.target.value);
+              setSaved(false);
+            }}
+            maxLength={1000}
+            rows={2}
+            className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus-visible:border-emerald-500 focus-visible:ring-3 focus-visible:ring-emerald-100 disabled:opacity-50"
+            placeholder="Shown below the shop name on invoices"
+          />
+          <small aria-hidden="true" className="block text-right text-slate-400">
+            {tagLine.length}/1000
+          </small>
+        </label>
+        <label className="block space-y-2 text-xs text-slate-500">
+          <span>Tag line 2</span>
+          <textarea
+            aria-label="Tag line 2"
+            value={tagLine2}
+            onChange={(event) => {
+              setTagLine2(event.target.value);
+              setSaved(false);
+            }}
+            maxLength={1000}
+            rows={3}
+            className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus-visible:border-emerald-500 focus-visible:ring-3 focus-visible:ring-emerald-100 disabled:opacity-50"
+            placeholder="Shown below Tag line 1 on invoices"
+          />
+          <small aria-hidden="true" className="block text-right text-slate-400">
+            {tagLine2.length}/1000
+          </small>
+        </label>
+        <label className="block space-y-2 text-xs text-slate-500">
+          <strong>ঠিকানা:</strong>
           <Input
             value={address}
             onChange={(event) => {
@@ -89,7 +139,7 @@ export function ShopProfileForm({
           />
         </label>
         <label className="block space-y-2 text-xs text-slate-500">
-          <span>Phone</span>
+          <strong>মোবাইল:</strong>
           <Input
             type="tel"
             value={phone}

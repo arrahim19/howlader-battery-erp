@@ -1,4 +1,5 @@
 "use client";
+import { BrandLogo } from "@/components/brand-logo";
 import { randomId } from "@/lib/random-id";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Dialog } from "radix-ui";
@@ -289,7 +290,11 @@ export function CustomerLedgerView({ preview }: { preview: boolean }) {
   return (
     <section className="customer-ledger" aria-label="Customer ledger">
       <div className="ledger-print-brand">
-        Howlader Battery<span>Customer statement</span>
+        <div className="ledger-print-identity">
+          <BrandLogo size={40} />
+          Howlader Battery
+        </div>
+        <span>Customer statement</span>
       </div>
       <div className="ledger-layout">
         <aside className="ledger-customers erp-panel">

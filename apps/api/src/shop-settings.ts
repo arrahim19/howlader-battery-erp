@@ -9,7 +9,14 @@ import {
   ValidationPipe,
 } from "@nestjs/common";
 import { Transform } from "class-transformer";
-import { IsInt, IsString, MaxLength, Min, MinLength } from "class-validator";
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength,
+} from "class-validator";
 import { Prisma } from "@prisma/client";
 import { Permissions, type AuthRequest } from "./auth";
 import { DatabaseService } from "./database.service";
@@ -20,6 +27,8 @@ const trim = ({ value }: { value: unknown }) =>
 
 class ShopProfileDto {
   @Transform(trim) @IsString() @MinLength(1) @MaxLength(120) name!: string;
+  @Transform(trim) @IsOptional() @IsString() @MaxLength(1000) tagLine?: string;
+  @Transform(trim) @IsOptional() @IsString() @MaxLength(1000) tagLine2?: string;
   @Transform(trim) @IsString() @MaxLength(500) address!: string;
   @Transform(trim) @IsString() @MaxLength(50) phone!: string;
   @IsInt() @Min(0) version!: number;
@@ -38,7 +47,7 @@ export class ShopSettingsController {
     const value = (shop?.value ?? {}) as Record<string, unknown>;
     return {
       data: Object.fromEntries(
-        ["name", "address", "phone"].map((key) => [
+        ["name", "tagLine", "tagLine2", "address", "phone"].map((key) => [
           key,
           typeof value[key] === "string" ? value[key] : "",
         ]),
@@ -81,6 +90,8 @@ export class ShopSettingsController {
           const value = {
             ...previous,
             name: body.name,
+            tagLine: body.tagLine ?? previous.tagLine ?? "",
+            tagLine2: body.tagLine2 ?? previous.tagLine2 ?? "",
             address: body.address,
             phone: body.phone,
           };
@@ -111,6 +122,8 @@ export class ShopSettingsController {
               requestId: req.requestId!,
               metadata: {
                 name: body.name,
+                tagLine: value.tagLine,
+                tagLine2: value.tagLine2,
                 address: body.address,
                 phone: body.phone,
               },

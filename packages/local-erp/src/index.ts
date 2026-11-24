@@ -204,6 +204,10 @@ export function validateLocalState(state: LocalErpState, shopId: string) {
       typeof value.name !== "string" ||
       !value.name.trim() ||
       value.name.length > 120 ||
+      (value.tagLine !== undefined &&
+        (typeof value.tagLine !== "string" || value.tagLine.length > 1000)) ||
+      (value.tagLine2 !== undefined &&
+        (typeof value.tagLine2 !== "string" || value.tagLine2.length > 1000)) ||
       typeof value.address !== "string" ||
       value.address.length > 500 ||
       typeof value.phone !== "string" ||
@@ -517,7 +521,14 @@ export class LocalErp {
   }
   saveShopProfile(
     key: string,
-    input: { name: string; address: string; phone: string; version: number },
+    input: {
+      name: string;
+      tagLine?: string;
+      tagLine2?: string;
+      address: string;
+      phone: string;
+      version: number;
+    },
   ) {
     return this.execute(
       "SHOP_PROFILE_UPDATE",
@@ -535,6 +546,16 @@ export class LocalErp {
         const profile = {
           value: {
             name: text(input.name, 120, true),
+            ...(input.tagLine === undefined
+              ? state.shopProfile?.value.tagLine === undefined
+                ? {}
+                : { tagLine: state.shopProfile.value.tagLine }
+              : { tagLine: text(input.tagLine, 1000) }),
+            ...(input.tagLine2 === undefined
+              ? state.shopProfile?.value.tagLine2 === undefined
+                ? {}
+                : { tagLine2: state.shopProfile.value.tagLine2 }
+              : { tagLine2: text(input.tagLine2, 1000) }),
             address: text(input.address, 500),
             phone: text(input.phone, 50),
           },
@@ -928,6 +949,7 @@ export class LocalErp {
         const sale: Sale = {
           id: key,
           invoiceNumber: "HB-" + String(state.nextSale++).padStart(4, "0"),
+          notes: text(input.notes ?? "", 2000),
           customerId: customer.id,
           date: date(input.date),
           sequence,

@@ -47,6 +47,7 @@ export interface SupplierLedger {
 }
 export interface CustomerRecord {
   id: string;
+  version?: number;
   name: string;
   phone: string;
   address: string | null;
@@ -77,10 +78,13 @@ export interface CustomerSalesHistory {
     id: string;
     invoiceNumber: string | null;
     soldAt: string | null;
+    notes?: string;
     status: string;
     subtotal: string;
     discount: string;
     total: string;
+    paid?: string;
+    due?: string;
     products: {
       id: string;
       name: string;
@@ -131,6 +135,8 @@ export interface CatalogMetadata {
 }
 export interface CatalogProduct {
   id: string;
+  version?: number;
+  unitEditable?: boolean;
   name: string;
   model: string;
   unit: string;

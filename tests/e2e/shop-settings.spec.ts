@@ -3,9 +3,14 @@ import { test, expect } from "@playwright/test";
 test("shop profile is editable, saved, and reflected in the sidebar after reload", async ({
   page,
 }, testInfo) => {
+  const longTagLine =
+    "Authorized dealer for batteries and auto parts. ".repeat(12).trim() +
+    "\nService and support.";
   let shop = {
     value: {
       name: "Original Battery",
+      tagLine: "Original tag line",
+      tagLine2: "",
       address: "",
       phone: "",
       currency: "BDT",
@@ -40,6 +45,8 @@ test("shop profile is editable, saved, and reflected in the sidebar after reload
         const body = route.request().postDataJSON();
         expect(body).toEqual({
           name: "New Battery House",
+          tagLine: "Batteries and Auto Parts",
+          tagLine2: longTagLine,
           address: "Dhaka, Bangladesh",
           phone: "01712345678",
           version: 1,
@@ -49,6 +56,8 @@ test("shop profile is editable, saved, and reflected in the sidebar after reload
           value: {
             ...shop.value,
             name: body.name,
+            tagLine: body.tagLine,
+            tagLine2: body.tagLine2,
             address: body.address,
             phone: body.phone,
           },
@@ -70,9 +79,16 @@ test("shop profile is editable, saved, and reflected in the sidebar after reload
     page.getByText("Business timezone", { exact: true }),
   ).toHaveCount(0);
   await expect(page.getByText("Read only", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Tag line 1", { exact: true })).toHaveValue(
+    "Original tag line",
+  );
   await page.getByLabel("Shop name", { exact: true }).fill("New Battery House");
-  await page.getByLabel("Address", { exact: true }).fill("Dhaka, Bangladesh");
-  await page.getByLabel("Phone", { exact: true }).fill("01712345678");
+  await page
+    .getByLabel("Tag line 1", { exact: true })
+    .fill("Batteries and Auto Parts");
+  await page.getByLabel("Tag line 2", { exact: true }).fill(longTagLine);
+  await page.getByLabel("ঠিকানা:", { exact: true }).fill("Dhaka, Bangladesh");
+  await page.getByLabel("মোবাইল:", { exact: true }).fill("01712345678");
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("status")).toHaveText("Shop profile saved.");
   await expect(
@@ -87,10 +103,16 @@ test("shop profile is editable, saved, and reflected in the sidebar after reload
   await expect(page.getByLabel("Shop name", { exact: true })).toHaveValue(
     "New Battery House",
   );
-  await expect(page.getByLabel("Address", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("Tag line 1", { exact: true })).toHaveValue(
+    "Batteries and Auto Parts",
+  );
+  await expect(page.getByLabel("Tag line 2", { exact: true })).toHaveValue(
+    longTagLine,
+  );
+  await expect(page.getByLabel("ঠিকানা:", { exact: true })).toHaveValue(
     "Dhaka, Bangladesh",
   );
-  await expect(page.getByLabel("Phone", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("মোবাইল:", { exact: true })).toHaveValue(
     "01712345678",
   );
   await expect(page.locator(".desktop-sidebar .shop-card")).toContainText(

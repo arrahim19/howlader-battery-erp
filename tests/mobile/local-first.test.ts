@@ -167,6 +167,7 @@ const sale = (quantity = 1) => ({
   saleDate: "2026-11-23",
   items: [{ productId, quantity, unitPrice: "10.00" }],
   paidAmount: "5.00",
+  notes: "Handle with care\nDeliver after 5 PM",
 });
 
 test("local sale commits, updates stock/dues/dashboard without a network read and survives SQLite restart", async () => {
@@ -227,6 +228,8 @@ test("local sale commits, updates stock/dues/dashboard without a network read an
       "/sales?page=1&pageSize=20",
     );
     assert.equal(sales.data.items.length, 1);
+    const history = await engine.read<{items:{notes:string}[]}>(`/customers/${customerId}/sales`);
+    assert.equal(history.data.items[0].notes, "Handle with care\nDeliver after 5 PM");
     await assert.rejects(
       () => engine!.submit("/sales/complete", sale(99), randomUUID()),
       /Not enough stock/,
@@ -304,6 +307,11 @@ test("offline new customer, product, purchase, sale and collection compose over 
       customers.data.items.find((c) => c.id === contact)?.due,
       "13.00",
     );
+    const history = await engine.read<{
+      items: { paid: string; due: string }[];
+    }>(`/customers/${contact}/sales`);
+    assert.equal(history.data.items[0].paid, "7.00");
+    assert.equal(history.data.items[0].due, "13.00");
     const products = await engine.read<{
       items: { id: string; stock: { available: string } }[];
     }>("/products");
@@ -526,5 +534,33 @@ test("device clock changes cannot reorder dependent offline writes", async () =>
     await store.put(key,{...saved,createdAt:"2099-01-01T00:00:00.000Z"});
     await engine.submit("/customers", {name:"New customer",phone:"01700000002",address:"Betagi"}, second);
     assert.deepEqual((await engine.commands()).map(c=>c.id),[first,second]);
+  } finally { engine.stop(); database.close(); }
+});
+
+test("shop name and tag line save offline, survive restart, and allow clearing the tag line", async () => {
+  const database = open(":memory:");
+  const store = await database.store;
+  const initial = snapshot();
+  initial.views["/auth/me"] = { ...user, permissions: [...user.permissions, "settings.manage"] };
+  initial.views["/settings/shop"] = { value: { name: "Original", address: "", phone: "" }, version: 1 };
+  await store.put(prefix, initial);
+  let engine = new SyncEngine(store, scope, async () => { throw new ConnectionError("offline"); }, { localFirst: true });
+  engine.network(false);
+  try {
+    await engine.submit("/settings/shop", { name: "New Shop", tagLine: "  Batteries and Parts  ", tagLine2: "  " + "Authorized dealer ".repeat(40).trim() + "  ", address: "", phone: "", version: 1 }, randomUUID());
+    const profile = await engine.read<{name: string; tagLine: string}>("/shop-profile");
+    assert.equal(profile.data.name, "New Shop");
+    assert.equal(profile.data.tagLine, "Batteries and Parts");
+    assert.equal((await engine.read<{tagLine2: string}>("/shop-profile")).data.tagLine2, "Authorized dealer ".repeat(40).trim());
+    engine.stop();
+    engine = new SyncEngine(store, scope, async () => { throw new ConnectionError("offline"); }, { localFirst: true });
+    engine.network(false);
+    assert.equal((await engine.read<{tagLine: string}>("/shop-profile")).data.tagLine, "Batteries and Parts");
+    await assert.rejects(engine.submit("/settings/shop", {name: "New Shop", tagLine: "x".repeat(1001), address: "", phone: "", version: 2}, randomUUID()), /valid shop details/);
+    await engine.submit("/settings/shop", {name: "New Shop", tagLine: "", address: "", phone: "", version: 2}, randomUUID());
+    assert.equal((await engine.read<{tagLine: string}>("/shop-profile")).data.tagLine, "");
+    assert.equal((await engine.read<{tagLine2: string}>("/shop-profile")).data.tagLine2, "Authorized dealer ".repeat(40).trim());
+    await engine.submit("/settings/shop", {name: "New Shop", tagLine: "", tagLine2: "", address: "", phone: "", version: 3}, randomUUID());
+    assert.equal((await engine.read<{tagLine2: string}>("/shop-profile")).data.tagLine2, "");
   } finally { engine.stop(); database.close(); }
 });

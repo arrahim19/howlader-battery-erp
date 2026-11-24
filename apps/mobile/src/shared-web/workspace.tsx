@@ -35,7 +35,6 @@ export default function Workspace({
   nativeViewport = false,
   onRequest,
   onNavigate,
-  onOriginChange,
 }: {
   dom?: DOMProps;
   pathname: string;
@@ -138,33 +137,6 @@ export default function Workspace({
               ) : (
                 <LoginForm deviceLogin />
               )}
-              <details
-                style={{
-                  padding: "12px 24px",
-                  background: "#fafbfe",
-                  color: "#667085",
-                  fontSize: 12,
-                }}
-              >
-                <summary>Server connection</summary>
-                <label>
-                  Website address
-                  <input
-                    aria-label="Website address"
-                    type="url"
-                    defaultValue={origin}
-                    onBlur={(event) => void onOriginChange(event.target.value)}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      padding: 10,
-                      border: "1px solid #e3e7f0",
-                      borderRadius: 8,
-                      marginTop: 8,
-                    }}
-                  />
-                </label>
-              </details>
             </div>
           ) : (
             <AppShell

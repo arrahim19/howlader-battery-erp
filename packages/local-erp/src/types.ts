@@ -53,6 +53,7 @@ export type Purchase = {
 export type Sale = {
   id: string;
   invoiceNumber: string;
+  notes?: string;
   customerId: string;
   date: string;
   sequence: number;
@@ -166,7 +167,13 @@ export type LocalErpState = {
     { id: string; name: string; categoryId: string }
   >;
   shopProfile?: {
-    value: { name: string; address: string; phone: string };
+    value: {
+      name: string;
+      tagLine?: string;
+      tagLine2?: string;
+      address: string;
+      phone: string;
+    };
     version: number;
   };
   purchases: Record<string, Purchase>;
@@ -202,6 +209,7 @@ export type PurchaseInput = {
 };
 export type SaleInput = {
   customerId: string;
+  notes?: string;
   date: string;
   items: ItemInput[];
   paid: string;

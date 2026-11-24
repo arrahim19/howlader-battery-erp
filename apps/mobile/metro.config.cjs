@@ -13,6 +13,7 @@ config.resolver.resolveRequest = (context, name, platform) => {
     "next/image": "image.tsx",
     "@/lib/api": "api.ts",
     "@/lib/invoice-image": "invoice-image.ts",
+    "@/lib/brand-image": "brand-image.ts",
     "@/components/session-provider": "session.tsx",
   };
   if (aliases[name]) name = path.join(adapters, aliases[name]);

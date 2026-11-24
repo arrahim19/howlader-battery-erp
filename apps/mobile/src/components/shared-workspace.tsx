@@ -140,6 +140,9 @@ export function SharedWorkspace({ pathname }: { pathname: string }) {
           };
         }
         if (method === "GET") {
+          if (/^\/(products|customers)\/[^/?]+$/.test(route)) {
+            return { ok: true, data: await auth.api(route, { method }) };
+          }
           if (!auth.local) throw new Error("Local database is not ready.");
           return { ok: true, data: (await auth.local.read(route)).data };
         }

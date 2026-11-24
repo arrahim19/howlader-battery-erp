@@ -23,6 +23,7 @@ import { type CatalogMetadata, type ProductList, api, csrf } from "@/lib/api";
 import { useCatalogResource } from "@/lib/use-catalog-resource";
 import { ProductNameForm } from "./catalog-forms";
 import { CatalogActions } from "./catalog-actions";
+import { ProductEditor } from "./product-editor";
 
 type DeleteTarget = {
   kind: "name";
@@ -101,6 +102,10 @@ export function CatalogView({ preview = false }: { preview?: boolean }) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [message, setMessage] = useState("");
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [editingBusy, setEditingBusy] = useState(false);
+  const canEdit =
+    !preview && Boolean(user?.permissions.includes("catalog.write"));
   const canWrite =
     preview || Boolean(user?.permissions.includes("catalog.write"));
   const metadataParams = new URLSearchParams({ status: "active" });
@@ -393,7 +398,6 @@ export function CatalogView({ preview = false }: { preview?: boolean }) {
                 </option>
               ))}
             </select>
-
           </div>
           {products.loading || products.data?.items.length ? (
             <div className="erp-table-wrap" aria-busy={products.loading}>
@@ -419,12 +423,36 @@ export function CatalogView({ preview = false }: { preview?: boolean }) {
                     </tr>
                   ) : null}
                   {products.data?.items.map((product, index) => (
-                    <tr key={product.id}>
+                    <tr
+                      key={product.id}
+                      className={
+                        canEdit ? "cursor-pointer hover:bg-green-50" : undefined
+                      }
+                      onClick={
+                        canEdit
+                          ? () => setEditingProductId(product.id)
+                          : undefined
+                      }
+                    >
                       <td>
                         {(mobile ? 0 : (page - 1) * pageSize) + index + 1}
                       </td>
                       <td>
-                        <strong>{product.name}</strong>
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            className="text-left font-bold hover:underline focus-visible:underline"
+                            aria-label={`Edit ${product.name} ${product.model}`.trim()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEditingProductId(product.id);
+                            }}
+                          >
+                            {product.name}
+                          </button>
+                        ) : (
+                          <strong>{product.name}</strong>
+                        )}
                       </td>
                       <td>{product.type.name}</td>
                       <td>{product.model.trim() || "N/A"}</td>
@@ -439,7 +467,11 @@ export function CatalogView({ preview = false }: { preview?: boolean }) {
                               )
                             : money(product.latestPurchasePrice)}
                       </td>
-                      <td>{product.warrantyMonths} মাস</td>
+                      <td>
+                        {product.warrantyMonths > 0
+                          ? `${product.warrantyMonths} মাস`
+                          : "N/A"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -501,6 +533,45 @@ export function CatalogView({ preview = false }: { preview?: boolean }) {
           </div>
         </Panel>
       </div>
+      <Dialog.Root
+        open={Boolean(editingProductId)}
+        onOpenChange={(open) => {
+          if (!open && !editingBusy) setEditingProductId(null);
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-70 bg-slate-950/40" />
+          <Dialog.Content className="feature-dialog max-h-[calc(100dvh-32px)] overflow-y-auto">
+            <Dialog.Title className="text-xl font-bold">
+              Edit Product
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-xs text-slate-500">
+              Update product details and selling defaults.
+            </Dialog.Description>
+            {editingProductId ? (
+              <ProductEditor
+                key={editingProductId}
+                productId={editingProductId}
+                metadata={metadata.data}
+                onBusyChange={setEditingBusy}
+                onCancel={() => setEditingProductId(null)}
+                onSaved={() => {
+                  setEditingProductId(null);
+                  setRevision((value) => value + 1);
+                  setMessage("Product updated.");
+                }}
+              />
+            ) : null}
+            <Dialog.Close
+              disabled={editingBusy}
+              aria-label="Close product editor"
+              className="absolute top-4 right-4"
+            >
+              <X size={18} />
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
       <AlertDialog.Root
         open={deleteOpen}
         onOpenChange={(open) => {

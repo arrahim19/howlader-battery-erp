@@ -981,6 +981,8 @@ test("shop profile saves validated identity, preserves business defaults, and re
       .send(body);
   const body = {
     name: "  Test Battery House  ",
+    tagLine: "  Batteries and Auto Parts  ",
+    tagLine2: "  " + "Authorized dealer ".repeat(40).trim() + "  ",
     address: "  Dhaka  ",
     phone: "  +8801700000000  ",
     version: 0,
@@ -997,12 +999,18 @@ test("shop profile saves validated identity, preserves business defaults, and re
     (await save(owner, { ...body, phone: "1".repeat(51) })).status,
     400,
   );
+  assert.equal(
+    (await save(owner, { ...body, tagLine: "x".repeat(1001) })).status,
+    400,
+  );
   assert.equal((await save(owner, { ...body, currency: "USD" })).status, 400);
   const created = await save(owner, body);
   assert.equal(created.status, 201);
   assert.equal(created.body.data.version, 1);
   assert.deepEqual(created.body.data.value, {
     name: "Test Battery House",
+    tagLine: "Batteries and Auto Parts",
+    tagLine2: "Authorized dealer ".repeat(40).trim(),
     address: "Dhaka",
     phone: "+8801700000000",
     currency: "BDT",
@@ -1021,6 +1029,8 @@ test("shop profile saves validated identity, preserves business defaults, and re
   const profile = await staff.get("/api/v1/shop-profile").expect(200);
   assert.deepEqual(profile.body.data, {
     name: "Updated Battery House",
+    tagLine: "Batteries and Auto Parts",
+    tagLine2: "Authorized dealer ".repeat(40).trim(),
     address: "",
     phone: "",
   });
@@ -4251,4 +4261,308 @@ test("replacement deletion restores stock once, excludes cancelled cases and rej
     },
   });
   assert.equal((await remove()).status, 409);
+});
+
+test("inventory product editing checks permissions, versions and duplicates without changing stock", async () => {
+  const type = await db.productType.upsert({
+    where: { code: "PARTS" },
+    update: { active: true },
+    create: { code: "PARTS", name: "Parts", trackingKind: "QUANTITY" },
+  });
+  const post = async (agent: TestAgent, path: string, body: object) =>
+    agent
+      .post("/api/v1/" + path)
+      .set("Origin", origin())
+      .set("X-CSRF-Token", await csrf(agent))
+      .send(body);
+  const name = "Edit fixture " + id;
+  await post(owner, "categories", { typeId: type.id, name });
+  const created = await post(owner, "products", {
+    typeId: type.id,
+    name,
+    category: name,
+    model: "OLD",
+    unit: "pcs",
+    defaultSellingPrice: "100.00",
+    warrantyMonths: 6,
+  });
+  assert.equal(created.status, 201);
+  const productId = created.body.data.id;
+  const posting = await db.posting.create({
+    data: {
+      actorId: ownerId,
+      kind: "TEST_OPENING",
+      sourceCode: "edit-opening-" + id,
+    },
+  });
+  const opening = await db.openingBalance.create({
+    data: {
+      number: "edit-opening-" + id,
+      postingId: posting.id,
+      reason: "Isolated edit test",
+      reconciliationReference: id,
+    },
+  });
+  const openingItem = await db.openingBalanceItem.create({
+    data: {
+      openingId: opening.id,
+      deduplicationKey: "edit-item-" + id,
+      kind: "STOCK",
+      details: {},
+    },
+  });
+  const batch = await db.stockBatch.create({
+    data: {
+      productId,
+      origin: "OPENING",
+      openingItemId: openingItem.id,
+      originalQuantity: 13,
+      unitCost: "80.000000",
+      balances: {
+        create: { location: "SHOP", bucket: "AVAILABLE", quantity: 13 },
+      },
+    },
+  });
+  const stockBefore = await db.stockBatch.findUnique({
+    where: { id: batch.id },
+    include: { balances: true },
+  });
+  const body = {
+    version: 1,
+    name,
+    model: "NEW",
+    unit: "pcs",
+    defaultSellingPrice: "125.50",
+    warrantyMonths: 12,
+  };
+  await request(app.getHttpServer())
+    .get(`/api/v1/products/${productId}`)
+    .expect(401);
+  assert.equal((await post(staff, `products/${productId}`, body)).status, 403);
+  await owner
+    .post(`/api/v1/products/${productId}`)
+    .set("Origin", origin())
+    .send(body)
+    .expect(403);
+  for (const invalid of [
+    { ...body, stock: { total: "999" } },
+    { ...body, latestPurchasePrice: "1" },
+    { ...body, typeId: randomUUID() },
+    { ...body, warrantyMonths: -1 },
+    { ...body, defaultSellingPrice: "1.234" },
+  ])
+    assert.equal(
+      (await post(owner, `products/${productId}`, invalid)).status,
+      400,
+    );
+  assert.equal(
+    (await post(owner, `products/${productId}`, { ...body, unit: "piece" }))
+      .status,
+    409,
+  );
+  assert.equal(
+    (await owner.get(`/api/v1/products/${productId}`).expect(200)).body.data
+      .unitEditable,
+    false,
+  );
+  const results = await Promise.all([
+    post(owner, `products/${productId}`, body),
+    post(owner, `products/${productId}`, { ...body, model: "RACE" }),
+  ]);
+  assert.deepEqual(results.map((r) => r.status).sort(), [201, 409]);
+  const current = (await owner.get(`/api/v1/products/${productId}`).expect(200))
+    .body.data;
+  assert.equal(current.version, 2);
+  assert.equal(current.defaultSellingPrice, "125.50");
+  assert.equal(current.warrantyMonths, 12);
+  assert.deepEqual(
+    await db.stockBatch.findUnique({
+      where: { id: batch.id },
+      include: { balances: true },
+    }),
+    stockBefore,
+  );
+  assert.equal(
+    await db.auditLog.count({
+      where: { resourceId: productId, action: "PRODUCT_UPDATED" },
+    }),
+    1,
+  );
+  const duplicate = await post(owner, "products", {
+    typeId: type.id,
+    name,
+    category: name,
+    model: "DUPLICATE",
+    unit: "pcs",
+  });
+  assert.equal(duplicate.status, 201);
+  assert.equal(
+    (
+      await post(owner, `products/${productId}`, {
+        ...body,
+        version: 2,
+        model: "DUPLICATE",
+      })
+    ).status,
+    409,
+  );
+  assert.equal(
+    (await owner.get(`/api/v1/products/${productId}`).expect(200)).body.data
+      .version,
+    2,
+  );
+  const stored = await db.product.findUniqueOrThrow({
+    where: { id: productId },
+  });
+  await db.product.update({
+    where: { id: productId },
+    data: { active: false },
+  });
+  assert.equal(
+    (
+      await post(owner, `products/${productId}`, {
+        ...body,
+        version: stored.version,
+      })
+    ).status,
+    400,
+  );
+});
+
+test("customer icon editing validates contacts and versions while preserving customer history", async () => {
+  const post = async (agent: TestAgent, path: string, body: object) =>
+    agent
+      .post("/api/v1/" + path)
+      .set("Origin", origin())
+      .set("X-CSRF-Token", await csrf(agent))
+      .send(body);
+  const created = await post(owner, "customers", {
+    name: "Original " + id,
+    phone: "01700000001",
+    address: "Betagi",
+  });
+  assert.equal(created.status, 201);
+  const customer = created.body.data;
+  const path = `customers/${customer.id}`;
+  const draft = await db.sale.create({
+    data: {
+      customerId: customer.id,
+      invoiceSnapshot: { customerName: customer.name },
+      status: "DRAFT",
+    },
+  });
+  const before = await db.sale.findUnique({ where: { id: draft.id } });
+  const body = {
+    version: customer.version,
+    name: "Updated " + id,
+    phone: "01900000002",
+    address: "Dhaka",
+  };
+  await request(app.getHttpServer())
+    .get("/api/v1/" + path)
+    .expect(401);
+  await owner
+    .post("/api/v1/" + path)
+    .set("Origin", origin())
+    .send(body)
+    .expect(403);
+  await owner.get(`/api/v1/customers/${randomUUID()}`).expect(404);
+  const permission = await db.permission.findUniqueOrThrow({
+    where: { code: "sales.manage" },
+  });
+  const role = await db.role.create({
+    data: {
+      code: "READ_EDIT_" + id,
+      name: "Read only",
+      permissions: { create: { permissionId: permission.id } },
+    },
+  });
+  await db.user.create({
+    data: {
+      login: "edit-reader-" + id,
+      name: "Read only",
+      passwordHash: await hash(password, passwordOptions),
+      roles: { create: { roleId: role.id } },
+    },
+  });
+  const reader = request.agent(app.getHttpServer());
+  assert.equal((await login(reader, "edit-reader-" + id)).status, 201);
+  await reader.get("/api/v1/" + path).expect(200);
+  assert.equal((await post(reader, path, body)).status, 403);
+  for (const invalid of [
+    { ...body, name: " " },
+    { ...body, phone: "bad" },
+    { ...body, address: "" },
+    { ...body, due: "1" },
+    { ...body, active: false },
+    { ...body, version: 0 },
+  ])
+    assert.equal((await post(owner, path, invalid)).status, 400);
+  const result = await Promise.all([
+    post(owner, path, body),
+    post(owner, path, { ...body, name: "Concurrent " + id }),
+  ]);
+  assert.deepEqual(result.map((r) => r.status).sort(), [201, 409]);
+  const updated = (await owner.get("/api/v1/" + path).expect(200)).body.data;
+  assert.equal(updated.id, customer.id);
+  assert.equal(updated.version, 2);
+  assert.equal(updated.phone, body.phone);
+  assert.equal(updated.address, body.address);
+  assert.equal(updated.due, customer.due);
+  assert.equal(updated.totalSales, customer.totalSales);
+  assert.equal(updated.active, true);
+  assert.deepEqual(
+    await db.sale.findUnique({ where: { id: draft.id } }),
+    before,
+  );
+  assert.equal(
+    await db.auditLog.count({
+      where: { resourceId: customer.id, action: "CUSTOMER_UPDATED" },
+    }),
+    1,
+  );
+});
+
+test("invoice notes are read from the saved sale snapshot with safe empty defaults", async () => {
+  const customer = await db.customer.create({
+    data: { name: "Notes " + id, phone: "01700000001", address: "Betagi" },
+    select: { id: true },
+  });
+  const snapshots = [
+    { notes: "Handle with care\nDeliver after 5 PM" },
+    { notes: "" },
+    {},
+    { notes: 12 },
+  ];
+  const invoices = [];
+  for (const [i, snapshot] of snapshots.entries())
+    invoices.push(
+      await db.sale.create({
+        data: {
+          customer: { connect: { id: customer.id } },
+          status: "CONFIRMED",
+          soldAt: new Date("2026-11-25T09:00:00Z"),
+          invoiceNumber: "NOTES-" + id + "-" + i,
+          invoiceSnapshot: snapshot,
+          subtotal: "10",
+          total: "10",
+          posting: {
+            create: {
+              actorId: ownerId,
+              kind: "TEST_SALE",
+              sourceCode: "notes-" + id + "-" + i,
+            },
+          },
+        },
+      }),
+    );
+  const response = await owner
+    .get(`/api/v1/customers/${customer.id}/sales`)
+    .expect(200);
+  for (const [i, invoice] of invoices.entries()) {
+    const result = response.body.data.items.find(
+      (row: { id: string }) => row.id === invoice.id,
+    );
+    assert.equal(result.notes, i === 0 ? snapshots[0].notes : "");
+  }
 });

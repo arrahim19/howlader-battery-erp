@@ -370,6 +370,7 @@ test("original ERP screen contracts post purchases, sales and collections locall
     {
       customerId: f.customer.id,
       saleDate: "2026-11-22",
+      notes: "Handle with care\nDeliver after 5 PM",
       items: [{ productId: f.product.id, quantity: 1, unitPrice: "150" }],
       paidAmount: "20",
     },
@@ -394,6 +395,7 @@ test("original ERP screen contracts post purchases, sales and collections locall
   )) as CustomerSalesHistory;
   assert.equal(history.items[0].products[0].model, "N/A");
   assert.equal(history.items[0].total, "150.00");
+  assert.equal(history.items[0].notes, "Handle with care\nDeliver after 5 PM");
   await api.request(
     "/expenses",
     "POST",
@@ -421,6 +423,8 @@ test("original ERP screen contracts post purchases, sales and collections locall
   assert.equal(profile.version, 0);
   const fields = {
     name: "Betagi Battery",
+    tagLine: "Batteries and Auto Parts",
+    tagLine2: "Authorized dealer ".repeat(40).trim(),
     address: "College Road",
     phone: "01712345678",
     version: 0,
@@ -432,7 +436,13 @@ test("original ERP screen contracts post purchases, sales and collections locall
     randomUUID(),
   )) as typeof profile;
   assert.deepEqual(savedProfile, {
-    value: { name: fields.name, address: fields.address, phone: fields.phone },
+    value: {
+      name: fields.name,
+      tagLine: fields.tagLine,
+      tagLine2: fields.tagLine2,
+      address: fields.address,
+      phone: fields.phone,
+    },
     version: 1,
   });
   assert.deepEqual(await api.request("/shop-profile"), savedProfile.value);

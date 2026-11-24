@@ -407,6 +407,7 @@ export class LocalWorkspaceApi {
                   id: v.id,
                   invoiceNumber: v.invoiceNumber,
                   soldAt: v.date,
+                  notes: v.notes ?? "",
                   status: "CONFIRMED",
                   subtotal: v.total,
                   discount: "0.00",
@@ -640,6 +641,8 @@ export class LocalWorkspaceApi {
       if (path === "/settings/shop")
         return this.device.command("profile", requestKey, {
           name: text("name"),
+          ...(b.tagLine === undefined ? {} : { tagLine: text("tagLine") }),
+          ...(b.tagLine2 === undefined ? {} : { tagLine2: text("tagLine2") }),
           address: text("address"),
           phone: text("phone"),
           version: b.version,
@@ -685,6 +688,7 @@ export class LocalWorkspaceApi {
       if (path === "/sales/complete") {
         const result = (await this.device.command("sale", requestKey, {
           customerId: text("customerId"),
+          notes: text("notes"),
           date: text("saleDate"),
           items: b.items,
           paid: text("paidAmount", "0"),

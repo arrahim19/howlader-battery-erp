@@ -1,18 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { Dialog } from "radix-ui";
-import Image from "next/image";
-import {
-  BatteryCharging,
-  Users,
-  CalendarDays,
-  MapPin,
-  Phone,
-  Printer,
-  ReceiptText,
-  X,
-} from "lucide-react";
+import { BrandLogo } from "@/components/brand-logo";
+import { CalendarDays, Printer, ReceiptText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type {
   CustomerRecord,
@@ -21,7 +12,11 @@ import type {
 } from "@/lib/api";
 import { api } from "@/lib/api";
 import { useCatalogResource } from "@/lib/use-catalog-resource";
+import type { ShopSettings } from "@/components/shop-profile-form";
+import { useSession } from "@/components/session-provider";
+import { CustomerEditor } from "./customer-editor";
 import { businessDate, money as formatMoney } from "@/lib/utils";
+import { setInvoicePrintTitle } from "@/lib/invoice-print-title";
 
 function money(value?: string | null) {
   const formatted = formatMoney(value);
@@ -30,145 +25,185 @@ function money(value?: string | null) {
     : formatted;
 }
 
-import { invoiceProductsImage } from "@/lib/invoice-image";
+import { takaInWords, invoiceAmount } from "@/lib/invoice-format";
 
 function InvoicePrintSheet({
   invoice,
   customer,
+  shop,
 }: {
   invoice: CustomerSalesHistory["items"][number];
   customer: Pick<CustomerRecord, "name" | "phone"> & Partial<CustomerRecord>;
+  shop: ShopSettings["value"];
 }) {
+  const quantity = invoice.products.reduce(
+    (sum, product) => sum + Number(product.quantity),
+    0,
+  );
   return createPortal(
     <section className="sale-invoice-print-sheet" aria-label="Invoice to print">
-      <header className="invoice-brand-banner">
-        <div className="invoice-brand-lockup">
-          <BatteryCharging className="invoice-brand-icon" strokeWidth={2.2} />
-          <div>
-            <h1>Howlader Battery</h1>
-            <p>Battery &amp; Auto Parts</p>
-          </div>
+      <header className="invoice-shop-header">
+        <BrandLogo size={64} />
+        <div>
+          <h1>{shop.name}</h1>
+          {shop.tagLine ? (
+            <p className="invoice-tagline">
+              <strong>{shop.tagLine}</strong>
+            </p>
+          ) : null}
+          {shop.tagLine2 ? (
+            <p className="invoice-tagline">{shop.tagLine2}</p>
+          ) : null}
+          {shop?.address ? (
+            <p>
+              <strong>ঠিকানা:</strong> {shop.address}
+            </p>
+          ) : null}
+          {shop?.phone ? (
+            <p>
+              <strong>মোবাইল:</strong> {shop.phone}
+            </p>
+          ) : null}
         </div>
-        <div className="invoice-brand-tag">
-          Auto Easy Bike Battery &amp; Parts
-        </div>
-        <Image
-          className="invoice-product-montage"
-          src={invoiceProductsImage}
-          width={1920}
-          height={800}
-          alt=""
-          unoptimized
-          loading="eager"
-        />
-        <svg
-          className="invoice-brand-wave"
-          viewBox="0 0 1000 85"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <path fill="#83c83e" d="M0 16Q250 140 510 54T1000 12V85H0Z" />
-          <path fill="#24933c" d="M0 30Q250 137 520 65T1000 25V85H0Z" />
-          <path fill="#086524" d="M0 47Q260 139 530 76T1000 43V85H0Z" />
-        </svg>
       </header>
-      <div className="invoice-document-title">
-        <span />
-        <h2>Sales Invoice</h2>
-        <span />
+      <div className="invoice-parties">
+        <section className="invoice-bill-to">
+          <h3>BILL TO</h3>
+          <strong>{customer.name}</strong>
+          {customer.address ? <p>{customer.address}</p> : null}
+          {customer.phone ? <p>Phone: {customer.phone}</p> : null}
+        </section>
+        <section className="invoice-reference-box">
+          <p>
+            <span>Invoice No:</span>
+            <strong>{invoice.invoiceNumber ?? "Invoice"}</strong>
+          </p>
+          <p>
+            <span>Date:</span>
+            <strong>
+              {invoice.soldAt
+                ? businessDate(invoice.soldAt)
+                : "Date unavailable"}
+            </strong>
+          </p>
+        </section>
       </div>
-      <div className="invoice-page-content">
-        <div className="invoice-parties">
-          <section className="invoice-customer-box">
-            <h3>
-              <Users /> Customer Information
-            </h3>
-            <div className="invoice-customer-lines">
-              <p>
-                <Users />
-                <strong>{customer.name}</strong>
-              </p>
-              <p>
-                <Phone />
-                <span>{customer.phone}</span>
-              </p>
-              <p>
-                <MapPin />
-                <span>{customer.address || "N/A"}</span>
-              </p>
-            </div>
-          </section>
-          <section className="invoice-reference-box">
-            <div>
-              <ReceiptText />
-              <p>
-                <span>Invoice No.</span>
-                <strong>{invoice.invoiceNumber ?? "Invoice"}</strong>
-              </p>
-            </div>
-            <div>
-              <CalendarDays />
-              <p>
-                <span>Invoice Date</span>
+      <h2 className="invoice-document-title">Sales Invoice</h2>
+      <table className="invoice-print-products">
+        <colgroup>
+          {[5, 39, 11, 9, 18, 18].map((width, index) => (
+            <col key={index} style={{ width: width + "%" }} />
+          ))}
+        </colgroup>
+        <thead>
+          <tr>
+            {[
+              "#",
+              "Item name",
+              "Quantity",
+              "Unit",
+              "Price / Unit (Tk)",
+              "Amount (Tk)",
+            ].map((label) => (
+              <th key={label} scope="col">
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {invoice.products.map((product, index) => (
+            <tr key={product.id}>
+              <td>{index + 1}</td>
+              <td>
                 <strong>
-                  {invoice.soldAt
-                    ? businessDate(invoice.soldAt)
-                    : "Date unavailable"}
+                  {product.name}
+                  {product.model?.trim() ? ` ${product.model.trim()}` : ""}
                 </strong>
-              </p>
-            </div>
-          </section>
+              </td>
+              <td>{product.quantity}</td>
+              <td>{product.unit}</td>
+              <td>{invoiceAmount(product.unitPrice)}</td>
+              <td>{invoiceAmount(product.amount)}</td>
+            </tr>
+          ))}
+          {invoice.products.length < 12 ? (
+            <tr
+              className="invoice-empty-row"
+              aria-hidden="true"
+              style={{
+                height: Math.max(12, 100 - invoice.products.length * 10) + "mm",
+              }}
+            >
+              {Array.from({ length: 6 }, (_, i) => (
+                <td key={i} />
+              ))}
+            </tr>
+          ) : null}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td />
+            <th scope="row">Total</th>
+            <td>{quantity}</td>
+            <td />
+            <td />
+            <td>
+              <strong>{invoiceAmount(invoice.subtotal)}</strong>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+      <div className="invoice-summary">
+        <div className="invoice-amount-words">
+          <p>
+            <strong>AMOUNT IN WORDS:</strong> {takaInWords(invoice.total)}
+          </p>
+          {invoice.notes?.trim() ? (
+            <p className="invoice-note">
+              <strong>NOTE:</strong> {invoice.notes.trim()}
+            </p>
+          ) : null}
         </div>
-        <div className="invoice-products-frame">
-          <table className="invoice-print-products">
-            <colgroup>
-              {[24, 18, 14, 22, 22].map((width, index) => (
-                <col key={index} style={{ width: width + "%" }} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                {["Product", "Model", "Qty", "Unit Price", "Total"].map(
-                  (label) => (
-                    <th key={label} scope="col">
-                      {label}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
+        <div className="invoice-totals-panel">
+          <table className="invoice-totals">
             <tbody>
-              {invoice.products.map((product) => (
-                <tr key={product.id}>
-                  <td>{product.name}</td>
-                  <td>{product.model?.trim() || "N/A"}</td>
-                  <td>
-                    {product.quantity} {product.unit}
-                  </td>
-                  <td>{money(product.unitPrice)}</td>
-                  <td>{money(product.amount)}</td>
+              <tr>
+                <th scope="row">Sub Total</th>
+                <td>{invoiceAmount(invoice.subtotal)}</td>
+              </tr>
+              {Number(invoice.discount) !== 0 ? (
+                <tr>
+                  <th scope="row">Discount</th>
+                  <td>-{invoiceAmount(invoice.discount)}</td>
                 </tr>
-              ))}
+              ) : null}
+              <tr className="invoice-total-row">
+                <th scope="row">Total</th>
+                <td>{invoiceAmount(invoice.total)}</td>
+              </tr>
+              <tr>
+                <th scope="row">Received</th>
+                <td>{invoiceAmount(invoice.paid)}</td>
+              </tr>
+              <tr className="invoice-due-row">
+                <th scope="row">Due</th>
+                <td>{invoiceAmount(invoice.due)}</td>
+              </tr>
             </tbody>
           </table>
         </div>
-        <div className="invoice-grand-total">
-          <span>Invoice Total</span>
-          <strong>{money(invoice.total)}</strong>
+      </div>
+      <div className="invoice-signatures">
+        <div>
+          <span>Received by</span>
         </div>
-        <div className="invoice-signature">
-          <p className="invoice-signature-name">Howlader</p>
-          <strong>Proprietor</strong>
-          <p>Howlader Battery House</p>
+        <div>
+          <span>Delivered by</span>
         </div>
-        <footer className="invoice-location">
-          <span />
-          <p>
-            <MapPin />
-            <strong>Location:</strong> College Road, Betagi-8740
-          </p>
-          <span />
-        </footer>
+        <div>
+          <span>Authorized Signatory</span>
+        </div>
       </div>
     </section>,
     document.body,
@@ -189,23 +224,28 @@ export function CustomerSalesHistoryDialog({
   onClose: () => void;
   returnFocus: () => void;
 }) {
+  const user = useSession();
+  const canEditCustomer =
+    !preview && Boolean(user?.permissions.includes("parties.customers"));
+  const [editingCustomer, setEditingCustomer] = useState(false);
+  const [editedCustomer, setEditedCustomer] = useState<CustomerRecord | null>(
+    null,
+  );
+  const editButton = useRef<HTMLButtonElement>(null);
+  const [printingShop, setPrintingShop] = useState<
+    ShopSettings["value"] | null
+  >(null);
   const [revision, setRevision] = useState(0);
   const [printingInvoice, setPrintingInvoice] = useState<
     CustomerSalesHistory["items"][number] | null
   >(null);
   const [preparingPrint, setPreparingPrint] = useState(false);
   const [printError, setPrintError] = useState("");
+  const restorePrintTitle = useRef<(() => void) | null>(null);
   useEffect(() => {
-    if (!printingInvoice) return;
-    const previousTitle = document.title;
-    document.title = `Howlader Battery House - ${printingInvoice.invoiceNumber || printingInvoice.id}`;
     return () => {
-      document.title = previousTitle;
+      restorePrintTitle.current?.();
     };
-  }, [printingInvoice]);
-  useEffect(() => {
-    const image = new window.Image();
-    image.src = invoiceProductsImage;
   }, []);
   useEffect(() => {
     const finishPrinting = () => setPrintingInvoice(null);
@@ -267,7 +307,7 @@ export function CustomerSalesHistoryDialog({
       firstHistory.loading ||
       Boolean(needsMore && !historyData && !historyError),
   };
-  const details = history.data?.customer ?? customer;
+  const details = editedCustomer ?? history.data?.customer ?? customer;
   return (
     <Dialog.Root
       open
@@ -286,9 +326,22 @@ export function CustomerSalesHistoryDialog({
           }}
         >
           <header className="customer-history-header">
-            <span className="customer-history-mark">
-              <ReceiptText size={24} />
-            </span>
+            {canEditCustomer ? (
+              <button
+                type="button"
+                ref={editButton}
+                className="customer-history-mark hover:bg-green-100"
+                aria-label="Edit customer"
+                title="Edit customer"
+                onClick={() => setEditingCustomer(true)}
+              >
+                <ReceiptText size={24} />
+              </button>
+            ) : (
+              <span className="customer-history-mark">
+                <ReceiptText size={24} />
+              </span>
+            )}
             <div className="customer-history-heading">
               <div className="customer-history-title-line">
                 <Dialog.Title>
@@ -385,18 +438,40 @@ export function CustomerSalesHistoryDialog({
                         setPreparingPrint(true);
                         setPrintError("");
                         try {
-                          flushSync(() => setPrintingInvoice(sale));
+                          const shop =
+                            await api<ShopSettings["value"]>("/shop-profile");
+                          if (!shop.name?.trim()) {
+                            throw new Error(
+                              "Set the shop name in Settings before printing.",
+                            );
+                          }
+                          flushSync(() => {
+                            setPrintingShop(shop);
+                            setPrintingInvoice(sale);
+                          });
                           const image =
                             document.querySelector<HTMLImageElement>(
                               ".sale-invoice-print-sheet img",
                             );
                           if (image) await image.decode();
                           await document.fonts.ready;
+                          // Mobile print services can read the PDF name after
+                          // afterprint fires. Keep it until this dialog closes.
+                          restorePrintTitle.current?.();
+                          restorePrintTitle.current = setInvoicePrintTitle(
+                            `${shop.name.trim()} - ${sale.invoiceNumber || sale.id}`,
+                          );
+                          // Allow the browser's title update to reach its print UI.
+                          await new Promise<void>((resolve) => {
+                            requestAnimationFrame(() => setTimeout(resolve, 0));
+                          });
                           window.print();
-                        } catch {
+                        } catch (error) {
                           setPrintingInvoice(null);
                           setPrintError(
-                            "Invoice image could not load. Please try printing again.",
+                            error instanceof Error
+                              ? error.message
+                              : "Unable to prepare the invoice. Please try printing again.",
                           );
                         } finally {
                           setPreparingPrint(false);
@@ -475,10 +550,26 @@ export function CustomerSalesHistoryDialog({
               ) : null}
             </div>
           </div>
+          {editingCustomer ? (
+            <CustomerEditor
+              customerId={customer.id}
+              onClose={() => setEditingCustomer(false)}
+              returnFocus={() => editButton.current?.focus()}
+              onSaved={(updated) => {
+                setEditedCustomer(updated);
+                setEditingCustomer(false);
+                setRevision((n) => n + 1);
+              }}
+            />
+          ) : null}
         </Dialog.Content>
       </Dialog.Portal>
-      {printingInvoice ? (
-        <InvoicePrintSheet invoice={printingInvoice} customer={details} />
+      {printingInvoice && printingShop ? (
+        <InvoicePrintSheet
+          invoice={printingInvoice}
+          customer={details}
+          shop={printingShop}
+        />
       ) : null}
     </Dialog.Root>
   );

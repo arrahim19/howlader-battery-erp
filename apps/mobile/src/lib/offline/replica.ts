@@ -206,6 +206,7 @@ export function projectReplica(
           {
             ...result,
             soldAt: when,
+            notes: str(b.notes).trim(),
             status: "LOCAL",
             discount: "0.00",
             products: items.map((item) => {
@@ -313,6 +314,13 @@ export function projectReplica(
         if (paid > 0n) {
           sale.due = add(sale.due, -paid);
           sale.paid = add(sale.paid, paid);
+          const invoice = list(`/customers/${payment[1]}/sales`).find(
+            (row) => row.id === sale.id,
+          );
+          if (invoice) {
+            invoice.paid = sale.paid;
+            invoice.due = sale.due;
+          }
           remaining -= paid;
         }
         if (remaining <= 0n) break;
@@ -910,6 +918,10 @@ export function localResult(
     if (
       !str(b.name).trim() ||
       str(b.name).length > 120 ||
+      (b.tagLine !== undefined &&
+        (typeof b.tagLine !== "string" || b.tagLine.length > 1000)) ||
+      (b.tagLine2 !== undefined &&
+        (typeof b.tagLine2 !== "string" || b.tagLine2.length > 1000)) ||
       str(b.address).length > 500 ||
       str(b.phone).length > 50
     )
@@ -918,6 +930,14 @@ export function localResult(
       value: {
         ...obj(profile.value),
         name: b.name,
+        tagLine:
+          b.tagLine === undefined
+            ? (obj(profile.value).tagLine ?? "")
+            : str(b.tagLine).trim(),
+        tagLine2:
+          b.tagLine2 === undefined
+            ? (obj(profile.value).tagLine2 ?? "")
+            : str(b.tagLine2).trim(),
         address: b.address,
         phone: b.phone,
       },
@@ -1004,6 +1024,12 @@ export function localResult(
       throw new Error("Enter a valid transaction date.");
     if (!sale && !str(b.reference).trim())
       throw new Error("Purchase reference is required.");
+    if (
+      sale &&
+      b.notes !== undefined &&
+      (typeof b.notes !== "string" || b.notes.length > 2000)
+    )
+      throw new Error("Sale notes must be at most 2000 characters.");
     const contacts = sale ? records("/customers") : records("/suppliers");
     if (
       !contacts.some(

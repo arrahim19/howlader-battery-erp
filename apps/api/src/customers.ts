@@ -35,7 +35,7 @@ import type {
   CustomerRecord,
   CustomerLedger,
 } from "../../../packages/api-client/src";
-import type { AuthRequest } from "./auth";
+import { Permissions, type AuthRequest } from "./auth";
 import { DatabaseService } from "./database.service";
 import { businessRange } from "./dashboard";
 import { nativeCreate } from "./native-create";
@@ -49,6 +49,9 @@ class CreateCustomerDto {
   @Matches(/^[+0-9][0-9 ()-]{5,29}$/)
   phone!: string;
   @Transform(trim) @IsString() @MinLength(1) @MaxLength(500) address!: string;
+}
+class UpdateCustomerDto extends CreateCustomerDto {
+  @IsInt() @Min(1) version!: number;
 }
 class CustomersQueryDto {
   @Transform(trim) @IsOptional() @IsString() @MaxLength(160) q?: string;
@@ -81,6 +84,7 @@ const validation = (expectedType: new () => object) =>
   });
 export const customerFields = {
   id: true,
+  version: true,
   name: true,
   phone: true,
   address: true,
@@ -148,6 +152,80 @@ function checkAccess(req: AuthRequest) {
 @Controller("customers")
 export class CustomersController {
   constructor(@Inject(DatabaseService) private readonly db: DatabaseService) {}
+
+  @Get(":id")
+  async details(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() req: AuthRequest,
+  ) {
+    checkAccess(req);
+    const customer = await this.db.customer.findUnique({
+      where: { id },
+      select: customerFields,
+    });
+    if (!customer) throw new NotFoundException("Customer not found.");
+    return { data: (await customerRecords(this.db, [customer]))[0] };
+  }
+
+  @Post(":id")
+  @Permissions("parties.customers")
+  async update(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(validation(UpdateCustomerDto)) body: UpdateCustomerDto,
+    @Req() req: AuthRequest,
+  ) {
+    const customer = await nativeCreate(
+      this.db,
+      req,
+      `MOBILE_CUSTOMER_UPDATE:${id}`,
+      body,
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Customer" WHERE id=${id}::uuid FOR UPDATE`;
+        const before = await tx.customer.findUnique({
+          where: { id },
+          select: customerFields,
+        });
+        if (!before) throw new NotFoundException("Customer not found.");
+        if (before.version !== body.version)
+          throw new ConflictException(
+            "Customer changed. Close and reopen the editor before saving again.",
+          );
+        const updated = await tx.customer.update({
+          where: { id },
+          data: {
+            name: body.name,
+            phone: body.phone,
+            address: body.address,
+            version: { increment: 1 },
+          },
+          select: customerFields,
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: req.currentUser!.id,
+            action: "CUSTOMER_UPDATED",
+            resourceType: "Customer",
+            resourceId: id,
+            requestId: req.requestId,
+            metadata: {
+              before: {
+                name: before.name,
+                phone: before.phone,
+                address: before.address,
+              },
+              after: {
+                name: updated.name,
+                phone: updated.phone,
+                address: updated.address,
+              },
+            },
+          },
+        });
+        return (await customerRecords(tx, [updated]))[0];
+      },
+    );
+    return { data: customer };
+  }
 
   @Get(":id/ledger")
   async ledger(
@@ -580,6 +658,14 @@ export class CustomersController {
         take: query.pageSize,
         orderBy: [{ soldAt: "desc" }, { id: "desc" }],
         include: {
+          paymentAllocations: {
+            where: {
+              reversedAllocationId: null,
+              reversal: { is: null },
+              payment: { reversedPaymentId: null, reversal: { is: null } },
+            },
+            select: { amount: true },
+          },
           items: {
             orderBy: { lineNumber: "asc" },
             include: {
@@ -600,10 +686,31 @@ export class CustomersController {
           id: sale.id,
           invoiceNumber: sale.invoiceNumber,
           soldAt: sale.soldAt?.toISOString() ?? null,
+          notes:
+            sale.invoiceSnapshot &&
+            typeof sale.invoiceSnapshot === "object" &&
+            !Array.isArray(sale.invoiceSnapshot) &&
+            typeof sale.invoiceSnapshot.notes === "string"
+              ? sale.invoiceSnapshot.notes
+              : "",
           status: sale.status,
           subtotal: sale.subtotal.toFixed(2),
           discount: sale.discount.toFixed(2),
           total: sale.total.toFixed(2),
+          paid: sale.paymentAllocations
+            .reduce(
+              (sum, allocation) => sum.add(allocation.amount),
+              new Prisma.Decimal(0),
+            )
+            .toFixed(2),
+          due: sale.total
+            .sub(
+              sale.paymentAllocations.reduce(
+                (sum, allocation) => sum.add(allocation.amount),
+                new Prisma.Decimal(0),
+              ),
+            )
+            .toFixed(2),
           products: sale.items.map((item) => {
             const snapshot =
               item.productSnapshot &&

@@ -1,4 +1,5 @@
 "use client";
+import { BrandLogo } from "@/components/brand-logo";
 import Link from "@/components/workspace-link";
 import { usePathname, useRouter } from "@/lib/workspace-router";
 import {
@@ -26,7 +27,6 @@ import {
   Trash2,
   ShoppingBag,
   ShoppingCart,
-  Store,
   Truck,
   Users,
   UsersRound,
@@ -114,26 +114,6 @@ const quickAccessLabels: Record<string, string> = {
   "/customers": "Customer",
   "/dashboard": "Dashboard",
 };
-function BrandMark() {
-  return (
-    <svg viewBox="0 0 56 48" aria-hidden="true">
-      <path
-        d="M13 9V4h7v5m16 0V4h7v5M9 11h39a3 3 0 0 1 3 3v26a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V14a3 3 0 0 1 3-3Zm-3 9h45"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.7"
-        strokeLinejoin="round"
-      />
-      <path d="m30 23-6 9h6l-2 8 10-12h-7l2-5Z" fill="currentColor" />
-      <path
-        d="M13 27h5m-5 8h5m25-8h3m-3 8h3"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 export function AppShell({
   children,
   preview = false,
@@ -261,7 +241,7 @@ export function AppShell({
         onClick={() => setOpen(false)}
       >
         <span className="brand-icon">
-          <BrandMark />
+          <BrandLogo size={40} />
         </span>
         <span>
           <strong>{shopName}</strong>
@@ -299,7 +279,7 @@ export function AppShell({
       </nav>
       <div className="sidebar-bottom">
         <div className="shop-card">
-          <Store size={28} strokeWidth={1.5} />
+          <BrandLogo size={36} />
           <div>
             <strong>{shopProfile?.name || "হাওলাদার ব্যাটারী হাউজ"}</strong>
             <p>{shopProfile?.address || "ব্যাটারি ও অটো পার্টস ম্যানেজমেন্ট"}</p>

@@ -9,16 +9,20 @@ export function CustomerForm({
   preview,
   onSaved,
   onCancel,
+  customer,
+  onBusyChange,
 }: {
   preview: boolean;
   onSaved: (customer: CustomerRecord) => void;
   onCancel?: () => void;
+  customer?: CustomerRecord;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (preview || saving) return;
+    if (preview || saving || (customer && !customer.version)) return;
     const form = new FormData(event.currentTarget);
     const text = (name: string) => String(form.get(name) ?? "").trim();
     const name = text("name");
@@ -34,19 +38,25 @@ export function CustomerForm({
     }
     setError("");
     setSaving(true);
+    onBusyChange?.(true);
     try {
-      const customer = await post<CustomerRecord>("/customers", {
-        name,
-        phone,
-        address,
-      });
-      onSaved(customer);
+      const saved = await post<CustomerRecord>(
+        customer ? `/customers/${customer.id}` : "/customers",
+        {
+          name,
+          phone,
+          address,
+          ...(customer ? { version: customer.version } : {}),
+        },
+      );
+      onSaved(saved);
     } catch (error) {
       setError(
         error instanceof Error ? error.message : "Unable to save the customer.",
       );
     } finally {
       setSaving(false);
+      onBusyChange?.(false);
     }
   }
   return (
@@ -56,6 +66,7 @@ export function CustomerForm({
         <Field label="Customer Name" required>
           <input
             name="name"
+            defaultValue={customer?.name ?? ""}
             aria-label="Customer name"
             autoComplete="name"
             required
@@ -65,6 +76,7 @@ export function CustomerForm({
         <Field label="Mobile Number" required>
           <input
             name="phone"
+            defaultValue={customer?.phone ?? ""}
             aria-label="Customer mobile number"
             type="tel"
             autoComplete="tel"
@@ -76,6 +88,7 @@ export function CustomerForm({
         <Field label="Address" required className="sm:col-span-2">
           <textarea
             name="address"
+            defaultValue={customer?.address ?? ""}
             aria-label="Customer address"
             autoComplete="street-address"
             maxLength={500}
@@ -105,9 +118,16 @@ export function CustomerForm({
             Cancel
           </Button>
         ) : null}
-        <Button type="submit" disabled={preview || saving}>
-          {saving ? <LoaderCircle className="animate-spin" /> : <Plus />}
-          {saving ? "Saving..." : "Save Customer"}
+        <Button
+          type="submit"
+          disabled={preview || saving || Boolean(customer && !customer.version)}
+        >
+          {saving ? (
+            <LoaderCircle className="animate-spin" />
+          ) : customer ? null : (
+            <Plus />
+          )}
+          {saving ? "Saving..." : customer ? "Save changes" : "Save Customer"}
         </Button>
       </div>
     </form>
